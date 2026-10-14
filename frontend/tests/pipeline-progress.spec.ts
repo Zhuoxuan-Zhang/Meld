@@ -17,7 +17,7 @@ test("public pipeline progress follows persisted analysis, comparison and merge 
     const state: any = { status: "running", active_stage: "analyze-app3", stages: { "analyze-app1": {}, "analyze-app2": {} }, calls: [] };
     await write(path.join(run, "run.json"), state);
     let job = await jobs.get(id);
-    expect(job.progress!.apps.map(app => app.analysis)).toEqual(["completed", "completed", "running"]); expect(job.phase).toContain("2/3 completed"); expect(job.phase).toContain("Reference 3");
+    expect(job.progress!.apps.map(app => app.analysis)).toEqual(["completed", "completed", "running"]); expect(job.phase).toBe("Analyzing reference apps…");
     state.stages["analyze-app3"] = {}; state.active_stage = "compare"; await write(path.join(run, "run.json"), state);
     job = await jobs.get(id); expect(job.progress!.stage).toBe("compare"); expect(job.progress!.steps.find(step => step.id === "analysis")!.status).toBe("completed"); expect(job.progress!.steps.find(step => step.id === "compare")!.status).toBe("running");
     state.stages.compare = {}; state.active_stage = "design"; await write(path.join(run, "run.json"), state);

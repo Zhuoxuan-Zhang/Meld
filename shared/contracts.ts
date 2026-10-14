@@ -27,7 +27,7 @@ export type Decision = { id: string; kind: "merge_choices"; jobId: string; compa
 export type JobStatus = "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed";
 export type PipelineProgress = {
   stage: "download" | "analysis" | "compare" | "merge" | "document" | "complete";
-  apps: { appId: string; title: string; download: { status: "pending" | "running" | "completed" | "failed"; bytes: number; totalBytes?: number; source?: string; message?: string }; analysis: "pending" | "running" | "completed" | "failed" }[];
+  apps: { appId: string; title: string; download: { status: "pending" | "running" | "completed" | "failed"; bytes: number; totalBytes?: number; source?: string; message?: string }; analysis: "pending" | "running" | "completed" | "failed" | "skipped" }[];
   steps: { id: string; label: string; status: "pending" | "running" | "completed" | "failed" | "waiting" }[];
   modelCalls?: number;
 };

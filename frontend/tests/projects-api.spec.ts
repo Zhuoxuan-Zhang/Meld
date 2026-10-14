@@ -27,14 +27,18 @@ test("server-owned profiles persist, reject stale updates and deduplicate retrie
     const reloaded = new ProjectService(api.options); expect((await reloaded.get(p.id)).brief.name).toBe("Updated");
   } finally { await api.close(); }
 });
-test("one research job retains Top 5 evidence and missing APKs never become an app", async () => {
+test("missing APKs preserve all Top 5 market references and continue to a proposed design", async () => {
   const api = await projectServer({ apks: false });
   try {
     const p = await research(api, await create(api)); expect(p.references.Productivity.apps).toHaveLength(5); expect(p.references.Productivity.scanId).toMatch(/^scan-/);
     const body = action(p), submitted = await call<Job>(api, `/api/projects/${p.id}/design`, body), waiting = await wait(api, submitted);
-    expect(waiting.status).toBe("waiting_inputs"); expect(waiting.missingInputs).toHaveLength(5);
+    expect(waiting.status).toBe("waiting_user"); expect(waiting.missingInputs).toBeUndefined();
+    expect(waiting.progress!.apps.every(app => app.analysis === "skipped")).toBe(true);
     expect((await call<Job>(api, `/api/projects/${p.id}/design`, body)).id).toBe(submitted.id);
-    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull(); expect(api.counts().analysisCalls).toBe(0);
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull(); expect(api.counts().analysisCalls).toBe(1);
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing product choice");
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).design).toBeDefined(); expect((await call<Project>(api, `/api/projects/${p.id}`)).latestBuild).toBeNull();
   } finally { await api.close(); }
 });
 test("initial conflicts require explicit valid user choices before a design exists", async () => {
@@ -123,7 +127,7 @@ test("project API rejects foreign origins, oversized input and fabricated resear
   } finally { await api.close(); }
 });
 
-test("automatic APK acquisition exposes per-app failures and retries only missing files (synthetic downloads)", async () => {
+test("partial APK acquisition automatically continues and preserves its reference set through confirmation (synthetic downloads)", async () => {
   const calls: string[] = []; let firstFailure = true;
   const api = await projectServer({ apks: false, acquireApk: async (packageId, file, progress) => {
     calls.push(packageId); await progress({ status: "running", bytes: 128, totalBytes: 256, source: "Synthetic fixture" });
@@ -133,10 +137,25 @@ test("automatic APK acquisition exposes per-app failures and retries only missin
   } });
   try {
     const p = await research(api, await create(api)), started = await call<Job>(api, `/api/projects/${p.id}/design`, action(p)), blocked = await wait(api, started);
-    expect(blocked.status).toBe("waiting_inputs"); expect(blocked.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
-    expect(blocked.progress!.apps.find(app => app.download.status === "failed")!.download.message).toContain("Fixture provider"); expect(api.counts().analysisCalls).toBe(0);
-    const retried = await call<Job>(api, `/api/jobs/${started.id}/resume`, {}), continued = await wait(api, retried);
-    expect(continued.status).toBe("waiting_user"); expect(calls).toHaveLength(6); expect(calls[5]).toBe(calls[0]);
-    expect(continued.progress!.steps.find(step => step.id === "download")!.status).toBe("completed"); expect(continued.progress!.apps.every(app => app.download.status === "completed")).toBe(true);
+    expect(blocked.status).toBe("waiting_user"); expect(blocked.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
+    expect(blocked.progress!.apps.find(app => app.download.status === "failed")!.download.message).toContain("Fixture provider"); expect(api.counts().analysisCalls).toBe(1); expect(blocked.missingInputs).toBeUndefined();
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing choice");
+    const continued = await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect(continued.status).toBe("succeeded"); expect(calls).toHaveLength(5);
+    expect(continued.progress!.steps.find(step => step.id === "download")!.status).toBe("completed"); expect(continued.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
+  } finally { await api.close(); }
+});
+
+test("incomplete APK analysis automatically falls back to a market-assisted design without rewriting the static attempt", async () => {
+  const api = await projectServer({ analysisFailure: true });
+  try {
+    const p = await research(api, await create(api)), task = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    expect(task.status).toBe("waiting_user"); expect(api.counts().analysisCalls).toBe(2);
+    const source = await api.service.storedJob(task.id), pipeline = await api.service.pipeline.get(source.pipelineJobId!);
+    expect(pipeline.execution).toBe("market"); expect(task.progress!.apps.every(app => app.analysis === "skipped")).toBe(true);
+    const original = await json(path.join(api.options.pipeline.directory, pipeline.id, "analysis/run.json")); expect(original.status).toBe("partial"); expect(original.error).toContain("incomplete static analysis");
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing choice");
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).design).toBeDefined(); expect(await json(path.join(api.options.pipeline.directory, pipeline.id, "analysis/run.json"))).toEqual(original);
   } finally { await api.close(); }
 });

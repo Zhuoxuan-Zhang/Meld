@@ -32,7 +32,7 @@ export class ProjectModel extends FixtureModel {
 export async function notebookFixture(dir: string) {
   const data = await sourceFixture(dir); data.design.title = "Pocket Notes"; data.design.features[0].title = "Write notes"; await write(path.join(dir, "final/final-design.json"), data.design); return data;
 }
-export async function projectServer({ apks = true, buildFailure = false, listedFeatures = false, acquireApk }: { apks?: boolean; buildFailure?: boolean; listedFeatures?: boolean; acquireApk?: ApkAcquirer } = {}) {
+export async function projectServer({ apks = true, buildFailure = false, listedFeatures = false, acquireApk, analysisFailure = false }: { apks?: boolean; buildFailure?: boolean; listedFeatures?: boolean; acquireApk?: ApkAcquirer; analysisFailure?: boolean } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "meld-project-test-")), model = new ProjectModel(), designs = new DesignService(pipelineRoot, path.join(root, "designs"), model), signals = new SignalsStore(path.join(root, "signals"));
   await notebookFixture(path.join(root, "example")); await designs.initialize("notes", path.join(root, "example"), {});
   const apkDir = path.join(root, "apks"); if (apks) {
@@ -53,7 +53,9 @@ export async function projectServer({ apks = true, buildFailure = false, listedF
       return { brief, references: [scan] };
     },
     pipeline: { directory: path.join(root, "pipeline"), apkDir, acquireApk, runner: async task => {
-      analysisCalls++; const market = await json(task.market); const locked = market.apps.map((a: any, i: number) => ({ id: `app${i + 1}`, package_name: a.appId, sha256: a.apk_sha256 }));
+      analysisCalls++; const market = await json(task.market);
+      if (analysisFailure && task.basis !== "market") { await write(path.join(task.run, "run.json"), { status: "partial", stages: {}, calls: [], error: "Synthetic incomplete static analysis" }); return 1; }
+       const locked = market.apps.map((a: any, i: number) => ({ id: `app${i + 1}`, package_name: a.appId, sha256: a.apk_sha256 }));
       if (!(await exists(path.join(task.run, "human-decisions.json")))) {
         await notebookFixture(task.run); await write(path.join(task.run, "apps.lock.json"), locked);
         for (const app of locked) await write(path.join(task.run, "apps", app.id, "app-spec.json"), { app_id: app.id, package_name: app.package_name, features: [] });

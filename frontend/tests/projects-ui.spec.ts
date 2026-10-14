@@ -68,17 +68,16 @@ test("free text, clarification, dismiss and restore stay in one review workspace
     await page.getByText("Design history and development files", { exact: true }).click(); await page.getByRole("button", { name: "Version history", exact: true }).click(); page.once("dialog", dialog => dialog.accept()); await page.getByRole("button", { name: "Restore", exact: true }).click(); await expect(page.getByText("Version 3", { exact: true })).toBeVisible();
   } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
 });
-test("missing reference files remain resumable across reload without a fake app", async ({ page }) => {
-  test.setTimeout(60000);
-  const api = await projectServer({ apks: false });
+test("missing APKs continue to the design while progress stays concise across reload", async ({ page }) => {
+  test.setTimeout(60000); const api = await projectServer({ apks: false });
   try {
     await connect(page, api); await page.goto("/"); await page.getByLabel("Describe your app", { exact: true }).fill(idea.input); await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("Search topic", { exact: true }).fill("Productivity"); await page.getByRole("button", { name: "Explore ideas", exact: true }).click();
-    await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "Some reference APKs need attention." })).toBeVisible();
-    await expect(page.getByLabel("Design generation progress")).toContainText("APKs ready: 0/5");
-    await expect(page.getByLabel("Design generation progress").locator(".studio-pipeline-apps article")).toHaveCount(5);
-    await expect(page.getByText("Check again", { exact: true })).toHaveCount(0);
-    await page.reload(); await expect(page.getByRole("heading", { name: "Some reference APKs need attention." })).toBeVisible(); await page.getByRole("button", { name: "Retry failed APK downloads" }).click(); await expect(page.getByRole("heading", { name: "Some reference APKs need attention." })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Download Android app" })).toHaveCount(0); expect(api.counts().analysisCalls).toBe(0);
+    await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
+    const progress = page.getByLabel("Design generation progress"); await expect(progress).toContainText("Get reference apps"); await expect(progress.locator("li")).toHaveCount(5);
+    await expect(progress.locator(".studio-pipeline-apps")).toHaveCount(0); await expect(page.getByText("Check again", { exact: true })).toHaveCount(0); await expect(page.getByRole("button", { name: "Retry failed APK downloads" })).toHaveCount(0);
+    await page.reload(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
+    await page.getByRole("button", { name: "Use these choices" }).click(); await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download Android app" })).toHaveCount(0); expect(api.counts().analysisCalls).toBe(2);
   } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
 });
 for (const width of [320, 390, 1440]) test(`new workspace is accessible and fits at ${width}px`, async ({ page }) => {
