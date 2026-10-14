@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Draft } from "./state";
+import { mergedFeatures } from "./state";
 import { Icon } from "./icons";
 import { designRequest, designUrl, jobFailure } from "./design";
 import type { DesignConnection, DesignJob, DesignView, DesignProposal } from "./design";
@@ -107,6 +108,7 @@ export default function DesignPanel({ draft, update, receiveMarket }: Props) {
         brief: { name: draft.name, audience: draft.audience, purpose: draft.description, goal: draft.goal, style: draft.style },
         preferences: Object.entries(draft.selected).filter(([id, features]) => features.length && scans.some(scan => scan.apps.some(app => app.appId === id))).map(([app_id, feature_ids]) => ({ app_id, feature_ids })),
         requested_features: [...new Set(Object.values(draft.selected).flat())],
+        feature_requests: mergedFeatures(draft).map(({ id, name, description }) => ({ id, name, description })),
       });
       setJob(value); callbacks.current.update({ designJobId: value.id, designProposalId: undefined });
     } catch (error) { setError((error as Error).message); }

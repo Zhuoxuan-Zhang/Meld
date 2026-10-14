@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "app_id": { "type": "string" },
+          "features": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "detail": { "type": "string" }
+              },
+              "required": ["name", "detail"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["app_id", "features"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["apps"],
+  "additionalProperties": false
+}

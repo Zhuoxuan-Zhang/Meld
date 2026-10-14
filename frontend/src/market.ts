@@ -22,8 +22,23 @@ export type MarketApp = {
   components: Record<string, number>;
   recentReviews: number;
   storeUrl: string;
+  // The developer's store description; absent in scans saved before it existed.
+  description?: string;
+  // Google Play image links ("" and [] when missing); absent in older scans.
+  iconUrl?: string;
+  screenshots?: string[];
+  // High-level features summarized from the description by Claude Code.
+  listedFeatures?: ListedFeatures;
   // Kept from an earlier scan because the user selected its features.
   retained?: boolean;
+};
+export type ListedFeature = { name: string; detail: string };
+export type ListedFeatures = {
+  items: ListedFeature[];
+  // Provenance, so a result can be traced to its prompt template and model.
+  model: string;
+  template: string;
+  generatedAt: string;
 };
 export type MarketStatus = "complete" | "partial" | "insufficient_results";
 export type MarketResult = {
@@ -88,7 +103,42 @@ const text = (v: unknown, max: number) =>
   typeof v === "string" ? v.trim().slice(0, max) : "";
 const count = (v: unknown) =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
-const packageId = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
+export const packageId = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
+// One line of plain text: no control characters, collapsed whitespace.
+export const plainLine = (v: unknown, max: number) =>
+  typeof v === "string"
+    ? v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, max)
+    : "";
+
+// Only images on Google Play's image server are shown; anything else is dropped.
+const imageUrl = (v: unknown) =>
+  typeof v === "string" &&
+  v.length <= 600 &&
+  /^https:\/\/play-lh\.googleusercontent\.com\/[\w\-/=]+$/.test(v)
+    ? v
+    : "";
+// Asks Google's image server for a smaller copy, e.g. "s128" or "h560".
+export const sizedImage = (url: string, size: string) =>
+  `${url.replace(/=[^/]*$/, "")}=${size}-rw`;
+
+// Validates features from the local server or a saved workspace.
+export function parseListedFeatures(v: unknown): ListedFeatures | undefined {
+  if (!isRecord(v) || !Array.isArray(v.items)) return undefined;
+  const generatedAt = text(v.generatedAt, 40);
+  const model = plainLine(v.model, 80);
+  const template = plainLine(v.template, 80);
+  if (!model || !template || Number.isNaN(Date.parse(generatedAt)))
+    return undefined;
+  const items = v.items
+    .filter(isRecord)
+    .map((f) => ({ name: plainLine(f.name, 60), detail: plainLine(f.detail, 200) }))
+    .filter((f) => f.name)
+    .slice(0, 6);
+  return { items, model, template, generatedAt };
+}
 const statuses: MarketStatus[] = ["complete", "partial", "insufficient_results"];
 
 function marketApp(v: unknown): MarketApp {
@@ -141,6 +191,16 @@ function marketApp(v: unknown): MarketApp {
     components,
     recentReviews: count(v.recentReviews),
     storeUrl,
+    ...(typeof v.description === "string"
+      ? { description: v.description.trim().slice(0, 4000) }
+      : {}),
+    ...(typeof v.iconUrl === "string" ? { iconUrl: imageUrl(v.iconUrl) } : {}),
+    ...(Array.isArray(v.screenshots)
+      ? { screenshots: v.screenshots.map(imageUrl).filter(Boolean).slice(0, 4) }
+      : {}),
+    ...(parseListedFeatures(v.listedFeatures)
+      ? { listedFeatures: parseListedFeatures(v.listedFeatures) }
+      : {}),
     ...(v.retained === true ? { retained: true } : {}),
   };
 }
@@ -231,13 +291,17 @@ export function fromScannerReport(
         components: a.score_components,
         recentReviews: a.recent_review_sample_count,
         storeUrl: a.store_url,
+        description: a.store_description,
+        iconUrl: a.icon_url,
+        screenshots: a.screenshot_urls,
       };
     }),
   });
 }
 
-// Sample features until REA analysis is connected: words in the store listing
-// pick matching feature briefs, and the domain's typical features fill the rest.
+// Sample features for listings Claude Code has not summarized: words in the
+// title and summary pick matching feature briefs. Nothing fills the gaps, so an
+// app never shows built-in features its listing does not mention.
 const keywordFeatures: [RegExp, string][] = [
   [/\b(to-?do|tasks?|checklists?|planner|reminders?|schedule)\b/i, "tasks"],
   [/\b(focus|pomodoro|timers?|concentrat\w*)\b/i, "timer"],
@@ -255,6 +319,7 @@ const keywordFeatures: [RegExp, string][] = [
   [/\b(bookmarks?|inspiration|collect\w*|identif\w*)\b/i, "bookmarks"],
   [/\b(progress|stats|statistics|insights?|reports?|charts?)\b/i, "insights"],
 ];
+// A domain's typical features are listed first when several match.
 const domainFeatures: Record<string, string[]> = {
   Productivity: ["tasks", "timer", "notes", "habits", "insights"],
   Wellness: ["breathing", "journal", "habits", "insights"],
@@ -263,18 +328,42 @@ const domainFeatures: Record<string, string[]> = {
   Fitness: ["workouts", "goals", "habits", "insights"],
   Creativity: ["boards", "bookmarks", "notes", "journal"],
 };
-const otherFeatures = ["notes", "tasks", "goals", "bookmarks", "insights"];
 export function sampleFeatureIds(domain: string, app: MarketApp) {
   const listing = `${app.title} ${app.summary}`;
-  const pool = domainFeatures[domain] || otherFeatures;
-  const matched = keywordFeatures
+  const pool = domainFeatures[domain] || [];
+  return keywordFeatures
     .filter(([pattern]) => pattern.test(listing))
     .map(([, id]) => id)
-    .sort((a, b) => Number(!pool.includes(a)) - Number(!pool.includes(b)));
-  // Rotate the fallback pool by rank so listings without keywords still differ.
-  const shift = (app.rank - 1) % pool.length;
-  const fill = [...pool.slice(shift), ...pool.slice(0, shift)];
-  return [...new Set([...matched, ...fill])].slice(0, Math.max(3, Math.min(4, matched.length)));
+    .sort((a, b) => Number(!pool.includes(a)) - Number(!pool.includes(b)))
+    .slice(0, 4);
+}
+// The features Claude Code found in the store listing, as choosable features.
+// Ids carry the app id, so the same name from two apps stays two features.
+export function listedFeatureChoices(app: MarketApp): Feature[] {
+  const used = new Set<string>();
+  return (app.listedFeatures?.items || []).map((f) => {
+    const base =
+      f.name
+        .normalize("NFKD")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 40) || "feature";
+    let slug = base;
+    for (let n = 2; used.has(slug); n++) slug = `${base}-${n}`;
+    used.add(slug);
+    const like = keywordFeatures.find(([pattern]) =>
+      pattern.test(`${f.name} ${f.detail}`),
+    );
+    return {
+      id: `${app.appId}:${slug}`,
+      name: f.name,
+      description: f.detail || f.name,
+      icon: like ? featureById[like[1]].icon : "Sparkles",
+      flow: "",
+      listed: true,
+    };
+  });
 }
 
 const palette = [
@@ -291,10 +380,25 @@ function colorsFor(domain: string, appId: string) {
   for (const c of appId) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
   return palette[hash % palette.length];
 }
-export function marketReferenceApp(domain: string, app: MarketApp): ReferenceApp {
-  const features: Feature[] = sampleFeatureIds(domain, app).map(
-    (id) => featureById[id],
-  );
+// Features come from the store listing once Claude Code has summarized it, and
+// from matching sample features until then. Sample features the user already
+// chose stay, so a summary never silently drops a choice.
+export function marketReferenceApp(
+  domain: string,
+  app: MarketApp,
+  chosen: unknown = [],
+): ReferenceApp {
+  const listed = listedFeatureChoices(app);
+  const samples = listed.length ? [] : sampleFeatureIds(domain, app);
+  const kept = Array.isArray(chosen)
+    ? Object.keys(featureById).filter(
+        (id) => chosen.includes(id) && !samples.includes(id),
+      )
+    : [];
+  const features: Feature[] = [
+    ...listed,
+    ...[...samples, ...kept].map((id) => featureById[id]),
+  ];
   const [color, bg] = colorsFor(domain, app.appId);
   const summary = app.summary || `${app.title} by ${app.developer}.`;
   return {
@@ -303,7 +407,10 @@ export function marketReferenceApp(domain: string, app: MarketApp): ReferenceApp
     domain,
     tagline: summary,
     description: summary,
-    icon: features[0].icon,
+    icon:
+      features[0]?.icon ||
+      domains.find((d) => d.name === domain)?.icon ||
+      "Sparkles",
     color,
     bg,
     label: app.retained
@@ -334,7 +441,7 @@ export function buildCatalog(
             (selected[a.id] as unknown[]).length > 0)),
     );
     for (const app of [
-      ...live.map((a) => marketReferenceApp(domain, a)),
+      ...live.map((a) => marketReferenceApp(domain, a, selected[a.appId])),
       ...samples,
     ])
       if (!seen.has(app.id)) {

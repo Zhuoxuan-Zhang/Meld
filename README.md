@@ -94,6 +94,8 @@ The CLI's standard output and `--out` contain `list[App]`. The HTTP response and
 | --- | --- |
 | `rank`, `app_id`, `title`, `developer` | Position within this scan and app identity. |
 | `category`, `genre_id`, `store_summary`, `store_url` | Public listing context and source link. |
+| `store_description` | The listing's full description as written by the developer, up to 4,000 characters. |
+| `icon_url`, `screenshot_urls` | Links to the listing's icon and up to four screenshots on Google's image servers (https only); `""` and `[]` when missing. |
 | `rating`, `ratings`, `installs` | Current listing metrics; missing rating is null, missing counts use zero in the inherited scoring formula. |
 | `offers_iap`, `contains_ads`, `price`, `currency` | Visible monetization signals, not actual revenue. |
 | `profitability_proxy_1_15` | Integer opportunity score, higher is better. |

@@ -21,6 +21,9 @@ export function useMarket(
   const [connection, setConnection] = useState<MarketConnection | null>(null);
   const [scans, setScans] = useState<Record<string, ScanState>>({});
   const requests = useRef(new Map<string, AbortController>());
+  // Domains rescanned this session because their saved scan predates store
+  // descriptions or image links.
+  const upgraded = useRef(new Set<string>());
   const slots = useRef({ active: 0, waiting: [] as (() => void)[] });
   const deliver = useRef(onResult);
   deliver.current = onResult;
@@ -126,9 +129,21 @@ export function useMarket(
   // Start scans for new domains; stop scans for removed ones.
   useEffect(() => {
     if (!connection?.available) return;
-    for (const domain of domains)
-      if (!market?.[domain] && !scans[domain] && !requests.current.has(domain))
+    for (const domain of domains) {
+      const result = market?.[domain];
+      const outdated =
+        !!result &&
+        !upgraded.current.has(domain) &&
+        result.apps.some(
+          (a) =>
+            !a.retained &&
+            (a.description === undefined || a.iconUrl === undefined),
+        );
+      if ((!result || outdated) && !scans[domain] && !requests.current.has(domain)) {
+        if (outdated) upgraded.current.add(domain);
         scan(domain);
+      }
+    }
     for (const [domain, controller] of requests.current)
       if (!domains.includes(domain)) {
         controller.abort();

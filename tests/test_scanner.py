@@ -51,6 +51,35 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(set(provider.listing_calls)), 8)
         self.assertEqual(result["collection"]["candidate_packages"], list(reversed(provider.rows)))
 
+    def test_listing_text_is_kept_and_bounded(self):
+        provider = FakeProvider()
+        provider.rows["example.notes0"]["summary"] = "Quick notes"
+        provider.rows["example.notes0"]["description"] = "• Offline notes\n" + "x" * 5000
+        result = scan(provider)
+        first, second = result["top_five"][0], result["top_five"][1]
+        self.assertEqual(first["store_summary"], "Quick notes")
+        self.assertTrue(first["store_description"].startswith("• Offline notes\n"))
+        self.assertEqual(len(first["store_description"]), 4000)
+        self.assertEqual(second["store_description"], "")
+
+    def test_image_links_are_kept_and_checked(self):
+        provider = FakeProvider()
+        provider.rows["example.notes0"]["icon"] = "https://play-lh.googleusercontent.com/icon0"
+        provider.rows["example.notes0"]["screenshots"] = [
+            f"https://play-lh.googleusercontent.com/shot{i}" for i in range(6)
+        ]
+        provider.rows["example.notes1"]["icon"] = "http://insecure.example/icon"
+        provider.rows["example.notes1"]["screenshots"] = ["javascript:alert(1)", 7, None]
+        provider.rows["example.notes2"]["screenshots"] = "https://play-lh.googleusercontent.com/not-a-list"
+        first, second, third = scan(provider)["top_five"][:3]
+        self.assertEqual(first["icon_url"], "https://play-lh.googleusercontent.com/icon0")
+        self.assertEqual(
+            first["screenshot_urls"],
+            [f"https://play-lh.googleusercontent.com/shot{i}" for i in range(4)],
+        )
+        self.assertEqual((second["icon_url"], second["screenshot_urls"]), ("", []))
+        self.assertEqual((third["icon_url"], third["screenshot_urls"]), ("", []))
+
     def test_discovery_uses_only_requested_topic_and_locale(self):
         provider = FakeProvider()
         scan(provider, country="GB", language="fr")

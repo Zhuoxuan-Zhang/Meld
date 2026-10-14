@@ -6,6 +6,38 @@ import type { Page } from "@playwright/test";
 test.skip(!process.env.MELD_LIVE_MARKET, "Set MELD_LIVE_MARKET=1 to run.");
 test.describe.configure({ mode: "serial" });
 test.setTimeout(420_000);
+// Claude Code feature summaries use your subscription; they run only with
+// MELD_LIVE_CLAUDE=1 as well. Otherwise a stand-in names three features per
+// listing, so the rest of Meld still runs on live Google Play apps.
+test.beforeEach(async ({ page }) => {
+  if (process.env.MELD_LIVE_CLAUDE) return;
+  const source = { model: "stand-in", template: "stand-in@000000000000" };
+  await page.route("**/api/claude/status", (r) =>
+    r.fulfill({ json: { available: true, ...source } }),
+  );
+  await page.route("**/api/claude/features", (r) => {
+    const { apps } = r.request().postDataJSON() as {
+      apps: { appId: string; title: string }[];
+    };
+    return r.fulfill({
+      json: {
+        features: Object.fromEntries(
+          apps.map((a) => [
+            a.appId,
+            {
+              ...source,
+              generatedAt: new Date().toISOString(),
+              items: ["home", "sharing", "reminders"].map((n) => ({
+                name: `${a.title.slice(0, 40)} ${n}`,
+                detail: `The ${n} the listing describes.`,
+              })),
+            },
+          ]),
+        ),
+      },
+    });
+  });
+});
 
 type MarketApp = {
   appId: string;
@@ -13,7 +45,18 @@ type MarketApp = {
   rank: number;
   score: number;
   storeUrl: string;
+  retained?: boolean;
+  listedFeatures?: { items: { name: string }[] };
+  iconUrl?: string;
+  screenshots?: string[];
 };
+// Waits until a Google Play image has loaded in the page.
+const loaded = (image: ReturnType<Page["locator"]>) =>
+  expect
+    .poll(() => image.evaluate((i: HTMLImageElement) => (i.complete ? i.naturalWidth : 0)), {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
 type Result = { domain: string; status: string; apps: MarketApp[] };
 const key = "meld.workspace.v1";
 const known = [
@@ -52,13 +95,18 @@ async function start(page: Page, domains: string[] = [], selected = {}) {
 }
 const saved = (page: Page) =>
   page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), key);
-// Waits until every chosen domain has a finished scan in the workspace.
+// Waits until every chosen domain has a finished scan in the workspace, with
+// its listings summarized.
 async function scanned(page: Page, domains: string[]) {
   await expect
     .poll(
       async () => {
         const d = await saved(page);
-        return domains.filter((x) => d.market?.[x]).length;
+        return domains.filter((x) =>
+          d.market?.[x]?.apps.every(
+            (a: MarketApp) => a.listedFeatures || a.retained,
+          ),
+        ).length;
       },
       { timeout: 300_000, intervals: [1000] },
     )
@@ -105,6 +153,7 @@ test("live scan results reach the catalog, detail page and design brief unchange
     page.getByRole("link", { name: "View on Google Play" }),
   ).toHaveAttribute("href", top.storeUrl);
   await expect(page.locator(".market-facts")).toContainText(`${top.score}/15`);
+  await expect(page.locator(".feature-card").first()).toBeVisible({ timeout: 300_000 });
   await page.getByRole("checkbox").first().check();
   await page.getByRole("button", { name: "Save & return" }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -137,7 +186,18 @@ for (const domain of known)
       await expect(
         page.getByRole("link", { name: "View on Google Play" }),
       ).toHaveAttribute("href", app.storeUrl);
-      expect(await page.locator(".feature-card").count()).toBeGreaterThanOrEqual(3);
+      // The real icon and screenshots load from Google Play's image server.
+      expect(app.iconUrl).toMatch(/^https:\/\/play-lh\.googleusercontent\.com\//);
+      await loaded(page.locator(".detail-title .app-icon img"));
+      if (app.screenshots?.length) {
+        const shot = page.locator(".app-screenshots img").first();
+        await shot.scrollIntoViewIfNeeded();
+        await loaded(shot);
+      }
+      // The listing's features are the choices.
+      const listed = app.listedFeatures!.items.map((f) => f.name);
+      if (listed.length)
+        await expect(page.locator(".feature-card .feature-title")).toContainText(listed);
     }
     await page.goto("/?live=1#/apps");
     await page.getByRole("button", { name: "Try an example", exact: true }).click();
@@ -263,5 +323,52 @@ test("quick toggling and a reload during a scan end in a consistent workspace", 
   expect(Object.keys(market).sort()).toEqual(["Creativity", "pottery"]);
   await page.getByRole("button", { name: "Explore apps" }).click();
   await expect(page.locator(".market-rows li")).toHaveCount(2);
+  expect(problems).toEqual([]);
+});
+
+test("a free-text domain is scanned as typed, and Claude Code summarizes every listing", async ({
+  page,
+}) => {
+  test.skip(!process.env.MELD_LIVE_CLAUDE, "Set MELD_LIVE_CLAUDE=1 to run Claude Code.");
+  const problems = watch(page);
+  const status = await (await page.request.get("/api/claude/status")).json();
+  expect(status.available, status.reason).toBe(true);
+  await page.goto("/");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.getByLabel("Your domains").fill("  habit   tracker ");
+  await page.getByLabel("Your domains").press("Enter");
+  expect((await saved(page)).domains).toEqual(["habit tracker"]);
+  await page.getByRole("button", { name: "Explore apps" }).click();
+  type Listed = { appId: string; title: string; retained?: boolean; listedFeatures?: { items: { name: string }[]; model: string; template: string } };
+  await expect
+    .poll(
+      async () => {
+        const apps: Listed[] = (await saved(page)).market?.["habit tracker"]?.apps || [];
+        return apps.length > 0 && apps.every((a) => a.listedFeatures);
+      },
+      { timeout: 300_000, intervals: [1000] },
+    )
+    .toBe(true);
+  const result = (await saved(page)).market["habit tracker"];
+  expect(result.genreId).toBeNull();
+  expect(result.queries).toEqual([]);
+  const apps: Listed[] = result.apps;
+  expect(apps.filter((a) => a.listedFeatures!.items.length >= 3).length).toBeGreaterThanOrEqual(
+    apps.length - 1,
+  );
+  for (const app of apps) {
+    expect(app.listedFeatures!.template).toBe(status.template);
+    expect(app.listedFeatures!.model).toContain("claude");
+  }
+  await expect(page.locator(".market-rows li")).not.toContainText("Summarizing");
+  await page.locator(".reference-card").first().click();
+  // The listing features are the app's choices.
+  await expect(page.locator(".feature-card .feature-title")).toContainText(
+    apps[0].listedFeatures!.items.map((f) => f.name),
+  );
+  await expect(page.locator(".feature-card")).toHaveCount(
+    apps[0].listedFeatures!.items.length,
+  );
   expect(problems).toEqual([]);
 });

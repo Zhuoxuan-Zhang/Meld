@@ -106,6 +106,13 @@ def _review_days(rows: list[dict[str, Any]], start: date, end: date) -> dict[str
     return daily
 
 
+def _image_url(value: Any) -> str:
+    """A public https image link from the listing, or "" when there is none."""
+    if isinstance(value, str) and value.startswith("https://") and len(value) <= 600 and value.isprintable():
+        return value
+    return ""
+
+
 def _fetch(
     app_id: str, provider: MarketProvider, options: ScanOptions, start: date, end: date,
 ) -> dict[str, Any] | None:
@@ -122,6 +129,7 @@ def _fetch(
     daily = _review_days(reviews[:100], start, end)
     recent = sum(daily.values())
     score, components = score_listing(listing, recent)
+    shots = listing.get("screenshots") if isinstance(listing.get("screenshots"), list) else []
     return {
         "app_id": app_id,
         "title": listing["title"],
@@ -129,6 +137,11 @@ def _fetch(
         "genre_id": listing.get("genreId"),
         "developer": listing.get("developer") or "Unknown",
         "store_summary": str(listing.get("summary") or "")[:1000],
+        # The developer's full listing text, for feature extraction downstream.
+        "store_description": str(listing.get("description") or "")[:4000],
+        # Links to the listing's icon and first screenshots on Google's image servers.
+        "icon_url": _image_url(listing.get("icon")),
+        "screenshot_urls": [url for url in map(_image_url, shots[:4]) if url],
         "rating": listing.get("score"),
         "ratings": listing.get("ratings") or listing.get("reviews") or 0,
         "installs": listing.get("realInstalls") or listing.get("minInstalls") or 0,

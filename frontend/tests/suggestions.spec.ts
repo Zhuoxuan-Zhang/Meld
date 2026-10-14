@@ -245,7 +245,7 @@ test("all six offline example plans are valid and custom-only domains give a use
   ).toBeDisabled();
   await expect(
     page.getByText(
-      "Add one of the example domains to get a feature suggestion.",
+      "Suggestions need apps to combine. Wait for market signals to find apps for your domains, or add a suggested domain.",
     ),
   ).toBeVisible();
 });

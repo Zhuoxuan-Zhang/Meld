@@ -1,6 +1,6 @@
 import { canonicalDomain } from "./data";
 import { buildCatalog, parseMarketResult } from "./market";
-import type { MarketResult } from "./market";
+import type { ListedFeatures, MarketApp, MarketResult } from "./market";
 import { validateSuggestion, selectionMatches } from "./suggestions";
 import type { Suggestion } from "./suggestions";
 export type Style = "warm" | "sage" | "ink";
@@ -108,14 +108,45 @@ export function loadDraft(): Draft {
     return emptyDraft();
   }
 }
+// Drops a suggestion or applied plan that no longer fits the catalog.
+function withValidPlans(d: Draft): Draft {
+  const apps = catalog(d);
+  for (const key of ["suggestion", "plan"] as const) {
+    try {
+      if (d[key]) validateSuggestion(d[key], d.domains, apps);
+    } catch {
+      d[key] = undefined;
+    }
+  }
+  return d;
+}
 // Stores a finished scan. Apps from the previous scan that still carry
 // selections are kept, and plans that no longer fit the catalog are dropped.
+// Features already summarized are reused when the listing is unchanged, or
+// when the user chose some of them.
 export function withMarketResult(
   d: Draft,
   domain: string,
   result: MarketResult,
 ): Draft {
   if (!d.domains.includes(domain)) return d;
+  const summarized = new Map<string, MarketApp>();
+  for (const r of Object.values(d.market || {}))
+    for (const a of r.apps) if (a.listedFeatures) summarized.set(a.appId, a);
+  result = {
+    ...result,
+    apps: result.apps.map((a) => {
+      const known = summarized.get(a.appId);
+      const chosen = d.selected[a.appId]?.some((id) =>
+        id.startsWith(a.appId + ":"),
+      );
+      return known &&
+        !a.listedFeatures &&
+        (known.description === a.description || chosen)
+        ? { ...a, listedFeatures: known.listedFeatures }
+        : a;
+    }),
+  };
   const kept = (d.market?.[domain]?.apps || [])
     .filter(
       (a) =>
@@ -123,22 +154,37 @@ export function withMarketResult(
         !result.apps.some((b) => b.appId === a.appId),
     )
     .map((a) => ({ ...a, retained: true }));
-  const next: Draft = {
+  return withValidPlans({
     ...d,
     market: {
       ...d.market,
       [domain]: { ...result, apps: [...result.apps, ...kept] },
     },
-  };
-  const apps = catalog(next);
-  for (const key of ["suggestion", "plan"] as const) {
-    try {
-      if (next[key]) validateSuggestion(next[key], next.domains, apps);
-    } catch {
-      next[key] = undefined;
-    }
-  }
-  return next;
+  });
+}
+// Adds summarized features to every saved copy of those apps. They replace
+// the apps' sample features, so plans built on those are dropped.
+export function withListedFeatures(
+  d: Draft,
+  features: Record<string, ListedFeatures>,
+): Draft {
+  if (!d.market) return d;
+  let changed = false;
+  const market = Object.fromEntries(
+    Object.entries(d.market).map(([domain, r]) => [
+      domain,
+      {
+        ...r,
+        apps: r.apps.map((a) => {
+          const f = features[a.appId];
+          if (!f || a.listedFeatures) return a;
+          changed = true;
+          return { ...a, listedFeatures: f };
+        }),
+      },
+    ]),
+  );
+  return changed ? withValidPlans({ ...d, market }) : d;
 }
 export function selectedApps(d: Draft) {
   return catalog(d).filter((a) => (d.selected[a.id]?.length || 0) > 0);
@@ -152,6 +198,7 @@ export function mergedFeatures(d: Draft) {
       description: string;
       icon: string;
       flow: string;
+      listed?: boolean;
       sources: string[];
     }
   >();

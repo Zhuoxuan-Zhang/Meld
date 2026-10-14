@@ -117,6 +117,14 @@ test("a scan is sent with the domain's search plan and returns normalized apps, 
       recentReviews: 100,
       storeUrl:
         "https://play.google.com/store/apps/details?id=com.example.calendar&hl=en&gl=us",
+      description:
+        "Plan your day with tasks, reminders and a focus timer.\n\nFeatures:\n• Calendar Pro widgets\n• Sync across devices\n• Reminders",
+      iconUrl: "https://play-lh.googleusercontent.com/icon0",
+      // Only Google Play's image server is allowed.
+      screenshots: [
+        "https://play-lh.googleusercontent.com/shot0a",
+        "https://play-lh.googleusercontent.com/shot0b",
+      ],
     });
     const second = await request.post(api.address + "/api/market/scan", {
       data: { domain: "Productivity" },

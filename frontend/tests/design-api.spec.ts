@@ -62,6 +62,25 @@ test("market handoff retains all five server snapshots and waits honestly for re
     expect((await request.post(api.address + "/api/design/pipeline", { data: { ...body, brief: { ...body.brief, name: "Different" } } })).status()).toBe(409);
   } finally { await api.close(); }
 });
+test("store-listing feature choices survive the handoff as user preferences", async ({ request }) => {
+  const api = await designServer();
+  try {
+    const scan = await api.signals.record(fromScannerReport("Productivity", scannerReport("Productivity")));
+    const feature = { id: "com.example.notes:organize-with-long-descriptive-feature-name", name: "Organize with folders", description: "Keep personal notes in named folders." };
+    const body = { ...input(scan.scanId!), requested_features: [feature.id], preferences: [{ app_id: "com.example.notes", feature_ids: [feature.id] }], feature_requests: [feature] };
+    const response = await request.post(api.address + "/api/design/pipeline", { data: body });
+    expect(response.status()).toBe(202);
+    const job = await wait(api.address, (await response.json()).id);
+    expect(job.status).toBe("waiting_inputs");
+    const saved = await json(path.join(api.root, "pipeline", job.id, "market.json"));
+    expect(saved.feature_requests).toEqual([feature]);
+    expect(saved.scans[0].apps[0].listedFeatures).toBeUndefined();
+    const wrongApp = await request.post(api.address + "/api/design/pipeline", { data: { ...body, request_key: randomUUID(), preferences: [{ app_id: "com.example.tasks", feature_ids: [feature.id] }] } });
+    expect(wrongApp.status()).toBe(422);
+    const missing = await request.post(api.address + "/api/design/pipeline", { data: { ...body, request_key: randomUUID(), feature_requests: [] } });
+    expect(missing.status()).toBe(422);
+  } finally { await api.close(); }
+});
 test("APK-ready handoff feeds every ranked package into the runner and imports its design (synthetic downstream)", async ({ request }) => {
   const apkDir = await mkdtemp(path.join(tmpdir(), "meld-apk-fixture-")); let received: string[] = [];
   const api = await designServer({ apkDir, runner: async task => {

@@ -12,8 +12,9 @@ export const DesignInput = z.object({
   request_key: identifier,
   scan_ids: z.array(z.string().regex(/^scan-[a-f\d]{64}$/)).min(1).max(8),
   brief: z.object({ name: z.string().trim().min(1).max(60), audience: z.string().max(600), purpose: z.string().max(600), goal: z.string().max(600), style: z.enum(["warm", "sage", "ink"]) }).strict(),
-  preferences: z.array(z.object({ app_id: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), feature_ids: z.array(z.string().max(60)).max(20) }).strict()).max(40),
-  requested_features: z.array(z.string().max(60)).max(20).default([]),
+  preferences: z.array(z.object({ app_id: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), feature_ids: z.array(z.string().min(1).max(240)).max(20) }).strict()).max(40),
+  requested_features: z.array(z.string().min(1).max(240)).max(100).default([]),
+  feature_requests: z.array(z.object({ id: z.string().min(1).max(240), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(100).default([]),
 }).strict();
 export type DesignInputValue = z.infer<typeof DesignInput>;
 export type PipelineJob = { id: string; design_id: string; input: DesignInputValue; signature: string;
@@ -72,10 +73,13 @@ export class PipelineJobs {
     for (const scan of scans) for (const app of scan.apps) if (!app.retained && (!all.has(app.appId) || app.score > all.get(app.appId)!.score)) all.set(app.appId, app);
     const preferences = new Map(input.preferences.map(p => [p.app_id, p.feature_ids]));
     if (preferences.size !== input.preferences.length) throw new WorkbenchError("invalid_input", "Choose each reference app only once.");
-    if (input.requested_features.some(id => !Object.hasOwn(featureById, id))) throw new WorkbenchError("invalid_feature", "A requested feature is no longer available.");
+    const described = new Map(input.feature_requests.map(feature => [feature.id, feature]));
+    if (described.size !== input.feature_requests.length) throw new WorkbenchError("invalid_feature", "Describe each requested feature only once.");
+    const hasFeature = (id: string, appId?: string) => Object.hasOwn(featureById, id) || (described.has(id) && (!appId || id.startsWith(`${appId}:`)));
+    if (input.requested_features.some(id => !hasFeature(id))) throw new WorkbenchError("invalid_feature", "A requested feature is no longer available.");
     for (const preference of input.preferences) {
       if (!all.has(preference.app_id)) throw new WorkbenchError("stale_reference", "A selected app is outside these market results. Refresh your app selection.", 409);
-      if (preference.feature_ids.some(id => !Object.hasOwn(featureById, id))) throw new WorkbenchError("invalid_feature", "A selected feature is no longer available.");
+      if (preference.feature_ids.some(id => !hasFeature(id, preference.app_id))) throw new WorkbenchError("invalid_feature", "A selected feature is no longer available.");
     }
     if (preferences.size > 5) throw new WorkbenchError("too_many_references", "Choose features from at most five reference apps.");
     const apps = [...all.values()].sort((a, b) => Number(preferences.has(b.appId)) - Number(preferences.has(a.appId)) || b.score - a.score || a.rank - b.rank || a.appId.localeCompare(b.appId)).slice(0, 5);
@@ -89,7 +93,7 @@ export class PipelineJobs {
       }
       const job: PipelineJob = { id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature,
         status: "queued", phase: "Preparing your reference apps…", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), reference_apps: apps.map(a => ({ appId: a.appId, title: a.title, rank: a.rank })) };
-      await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, preferences: input.preferences, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices are preferences; their sample briefs are not REA findings."] });
+      await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, preferences: input.preferences, feature_requests: input.feature_requests, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices and descriptions are preferences, not REA findings."] });
       index[input.request_key] = { signature, id: job.id }; await write(indexFile, index);
       this.enqueue(job, scans, apps); return job;
     }, 1000);
@@ -121,7 +125,13 @@ export class PipelineJobs {
         job.status = "waiting_inputs"; job.phase = "Your market results are saved. Reference files are needed before analysis can continue."; job.missing_apps = missing; return;
       }
       const directory = path.join(this.options.directory, job.id), run = path.join(directory, "analysis");
-      const preferences = [...job.input.requested_features, ...job.input.preferences.flatMap(p => p.feature_ids)].map(id => featureById[id].name);
+      const described = new Map((job.input.feature_requests || []).map(feature => [feature.id, feature]));
+      const preferences = [...job.input.requested_features, ...job.input.preferences.flatMap(p => p.feature_ids)].map(id => {
+        if (Object.hasOwn(featureById, id)) return featureById[id].name;
+        const feature = described.get(id);
+        if (!feature) throw new WorkbenchError("invalid_feature", "Refresh your feature choices before resuming.");
+        return `${feature.name}: ${feature.description}`;
+      });
       const brief = { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: ["create", "edit", "save", "find", "reopen"], max_features: 5, max_navigation: 3, offline_only: true,
         implementation: "Android Kotlin / Jetpack Compose", excluded: ["accounts", "cloud sync"],
         scope: `${job.input.brief.purpose || job.input.brief.goal}. User-selected feature preferences: ${[...new Set(preferences)].join(", ")}. Visual preference: ${job.input.brief.style}. Preferences are product requests, not verified source-app behaviors.`,
