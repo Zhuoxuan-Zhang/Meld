@@ -1,4 +1,4 @@
-import type { DesignView, DesignProposal } from "@meld/design-pipeline";
+import type { DesignView, ChangeProposal as DesignProposal } from "../../shared/contracts";
 export type { DesignView, DesignProposal };
 export type DesignConnection = { available: boolean; provider: string; model: string; exampleId: string | null; referenceFilesConfigured: boolean };
 export type DesignJob = { id: string; kind?: string; status: "queued" | "running" | "waiting_inputs" | "succeeded" | "failed"; phase?: string; result?: DesignView | DesignProposal;

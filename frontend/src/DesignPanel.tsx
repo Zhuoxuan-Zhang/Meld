@@ -4,7 +4,7 @@ import { mergedFeatures } from "./state";
 import { Icon } from "./icons";
 import { designRequest, designUrl, jobFailure } from "./design";
 import type { DesignConnection, DesignJob, DesignView, DesignProposal } from "./design";
-import type { UserDocumentT } from "@meld/design-pipeline";
+import type { UserDocument as UserDocumentT } from "../../shared/contracts";
 import { saveFile } from "./artifacts";
 import { parseMarketResult } from "./market";
 import type { MarketResult } from "./market";

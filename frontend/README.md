@@ -1,4 +1,12 @@
-# Meld — a local app studio demo
+# Meld frontend
+
+The default interface is a three-step project workspace: **Describe your app → Review and customize → Get your app**. A persistent sidebar reflects the server-owned app profile, confirmed design revision and build. The frontend calls the project API through its `/api` proxy; research/model orchestration and storage now live in `backend/`. See [project workflow and API contracts](../docs/project-workflow.md).
+
+Run `npm run dev` from the repository root. Frontend: port 4173. Backend: internal port 3001 (`MELD_API_PORT` can override it).
+
+## Earlier studio compatibility mode
+
+The following describes the earlier four-step studio, preserved at `/?legacy=1`. Its provider endpoints and browser-template export remain available for existing integrations. New project screens use the workflow documented above.
 
 The [interactive design document](../docs/design-doc-interaction.md) is now integrated into Review. It supports real pipeline output, a readable English explanation, feature settings and free text, selectable proposals, confirmation, version recovery and approved developer-design exports. It uses the server’s Codex CLI login separately from optional OpenRouter planning. Market results are handed off as server-owned scan IDs; actual APK files are required for the analysis stage.
 

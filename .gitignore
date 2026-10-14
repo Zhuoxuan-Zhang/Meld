@@ -18,3 +18,5 @@ outputs/
 /apk-design-mvp/
 /offline-notes-android/
 /demo-video/
+test-results/
+playwright-report/

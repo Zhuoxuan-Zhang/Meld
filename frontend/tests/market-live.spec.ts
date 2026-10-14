@@ -10,6 +10,7 @@ test.setTimeout(420_000);
 // MELD_LIVE_CLAUDE=1 as well. Otherwise a stand-in names three features per
 // listing, so the rest of Meld still runs on live Google Play apps.
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { (window as typeof window & { __MELD_LEGACY__?: boolean }).__MELD_LEGACY__ = true; });
   if (process.env.MELD_LIVE_CLAUDE) return;
   const source = { model: "stand-in", template: "stand-in@000000000000" };
   await page.route("**/api/claude/status", (r) =>

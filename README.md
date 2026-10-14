@@ -1,6 +1,6 @@
 # New App Agent
 
-Meld combines market research, APK analysis and an [interactive design-document workflow](docs/design-doc-interaction.md): market Top 5 → static APK analysis → detailed design → readable explanation → user-confirmed edits. The confirmed developer JSON is exported for app generation. Fresh analysis requires reference APKs; an Android coding/build worker is a separate downstream integration.
+Meld follows **Describe your app → Review and customize → Get your app**, with one saved app profile throughout. Its [project workflow](docs/project-workflow.md) connects market research, APK analysis, user conflict choices, readable/versioned designs and an Android build worker. Fresh analysis requires reference APKs; builds require SDK 35 and JDK 17+.
 
 ## Workspace and development
 
@@ -8,13 +8,15 @@ Develop directly from this repository root; there is no nested `repo/` checkout.
 
 | Folder | Responsibility |
 | --- | --- |
-| `frontend/` | React studio, local HTTP APIs, market handoff and design jobs |
+| `frontend/` | Three-step React studio and typed API client |
+| `backend/` | Project API, saved state, jobs, research and Android builds |
+| `shared/` | Public contracts and reference/catalog normalization |
 | `pipeline/` | TypeScript APK analysis, model calls, design validation and revision storage |
 | `app_market/` | Independent Python market collector |
 | `docs/` | Design interaction, setup and API contracts |
 | `md/` | Original APK-analysis implementation specification |
 
-With Node 24, run `scripts/dev.sh --no-open`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner and compiles the backend. See [frontend setup](frontend/README.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
+With Node 24, run `npm run dev`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner, compiles the pipeline and starts both services. API requests are proxied to internal port 3001 (configurable). See [workflow setup](docs/project-workflow.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
 
 ## Standalone market scanner
 

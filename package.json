@@ -1,0 +1,12 @@
+{
+  "name": "meld-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bash scripts/dev.sh --no-open",
+    "build": "npm --prefix frontend run build",
+    "test": "npm --prefix pipeline test && npm --prefix frontend test",
+    "typecheck": "npm --prefix pipeline run build && npm --prefix backend run typecheck",
+    "setup": "npm --prefix pipeline ci && npm --prefix frontend ci && npm --prefix frontend run setup:market"
+  }
+}

@@ -12,6 +12,7 @@ const pixel = Buffer.from(
 export const test = base.extend<{ offlineMarket: void }>({
   offlineMarket: [
     async ({ page }, use) => {
+      await page.addInitScript(() => { (window as typeof window & { __MELD_LEGACY__?: boolean }).__MELD_LEGACY__ = true; });
       await page.route("**/api/market/**", (route) =>
         route.request().url().endsWith("/api/market/status")
           ? route.fulfill({

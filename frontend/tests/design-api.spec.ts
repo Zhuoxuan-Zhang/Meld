@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { DesignService, pipelineRoot, write, json } from "@meld/design-pipeline";
+import { DesignService, pipelineRoot, write, json } from "../../pipeline/dist/src/integration.js";
 import { designApi } from "../server/design";
 import { SignalsStore } from "../server/signals";
 import { fromScannerReport } from "../src/market";

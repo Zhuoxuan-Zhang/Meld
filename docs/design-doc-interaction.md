@@ -1,5 +1,7 @@
 # Interactive design documents
 
+The new default workspace and project-based routes are documented in [project-workflow.md](project-workflow.md). This document describes the underlying design engine and compatibility endpoints, which remain available behind the backend on the frontend’s `/api` proxy.
+
 The design workflow is integrated into Kevin’s existing **Review** page. The detailed developer design remains authoritative. A model generates a shorter English explanation for ordinary users; changes become proposals that require confirmation before updating the detailed design. This checkout now lives directly at the workspace root, without a nested `repo/` folder.
 
 ## Run

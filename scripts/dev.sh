@@ -144,4 +144,4 @@ fi
 say "Starting Meld at $URL (press Control-C to stop)"
 args=(--host 127.0.0.1 --port "$PORT" --strictPort)
 [ "$OPEN" = 1 ] && args+=(--open)
-exec npx vite "${args[@]}"
+exec node "$ROOT/scripts/serve.mjs" "${args[@]}"

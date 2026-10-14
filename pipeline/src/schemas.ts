@@ -22,7 +22,7 @@ export const Comparison = z.object({
   coverage: A,
 });
 export const Decisions = z.object({
-  chosen_by: z.enum(['claude_proxy', 'openai_proxy', 'codex_proxy']), selections: z.array(z.object({ conflict_id: S, option_id: S, reason: S, rejected: z.array(z.object({ option_id: S, reason: S })), assumptions: A, sources: z.array(Ref) })),
+  chosen_by: z.enum(['claude_proxy', 'openai_proxy', 'codex_proxy', 'user']), selections: z.array(z.object({ conflict_id: S, option_id: S, reason: S, rejected: z.array(z.object({ option_id: S, reason: S })), assumptions: A, sources: z.array(Ref) })),
   global_consistency: z.object({ offline: z.boolean(), features_within_limit: z.boolean(), navigation_within_limit: z.boolean(), compatible: z.boolean(), explanation: S }),
 });
 const Acceptance = z.object({ id: S, given: S, when: S, then: S });

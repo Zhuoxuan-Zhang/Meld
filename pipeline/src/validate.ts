@@ -174,7 +174,7 @@ export async function validateRun(run: string) {
   const review = await load('synthesis/design-review.json');
   if (!Review.safeParse(review).success || !review.passed || review.issues.some((i: any) => i.severity === 'blocking')) errors.push('Unresolved design review');
   if (!design || design.status !== 'final') errors.push('Design missing or remains draft');
-  for (const label of ['compare', 'decide', 'design']) if (!state.calls?.some((c: any) => c.success && (c.stage === label || label === 'design' && c.stage.startsWith('design-repair-'))) && !(label==='design'&&state.config.provider==='codex_cli'&&['design-core-','design-pages-','design-contracts-'].every(prefix=>state.calls?.some((c:any)=>c.success&&c.stage.startsWith(prefix))))) errors.push(`Successful live stage missing ${label}`);
+  for (const label of ['compare', 'decide', 'design']) if (!(label === 'decide' && state.human_decisions && d?.chosen_by === 'user' && state.stages?.decide) && !state.calls?.some((c: any) => c.success && (c.stage === label || label === 'design' && c.stage.startsWith('design-repair-'))) && !(label==='design'&&state.config.provider==='codex_cli'&&['design-core-','design-pages-','design-contracts-'].every(prefix=>state.calls?.some((c:any)=>c.success&&c.stage.startsWith(prefix))))) errors.push(`Successful live stage missing ${label}`);
   if(state.config.provider==='codex_cli'&&state.calls?.some((c:any)=>c.stage.startsWith('design-core-'))&&design){
     const assembly=await load('synthesis/design-assembly.json');
     if(assembly?.final_design_sha256!==sha(JSON.stringify(design))||assembly.fragment_calls?.length!==3||!assembly.fields_generated_by_model||assembly.templates_used!==false) errors.push('Unverified fragmented design assembly');

@@ -1,0 +1,123 @@
+import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { write, json, semanticHash } from "../../pipeline/dist/src/integration.js";
+import { ProjectService } from "../../backend/src/projects";
+import { projectServer, idea } from "./project-fixtures";
+import type { ProjectTestServer } from "./project-fixtures";
+import type { Project, Job } from "../../shared/contracts";
+
+async function call<T>(api: ProjectTestServer, suffix: string, body?: unknown, method = body ? "POST" : "GET"): Promise<T> {
+  const response = await fetch(api.address + suffix, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); return response.json() as Promise<T>;
+}
+async function wait(api: ProjectTestServer, job: Job) { await expect.poll(async () => (await call<Job>(api, `/api/jobs/${job.id}`)).status).not.toMatch(/^(queued|running)$/); return call<Job>(api, `/api/jobs/${job.id}`); }
+const action = (p: Project) => ({ requestKey: randomUUID(), expectedVersion: p.version });
+async function create(api: ProjectTestServer, example = false) { return call<Project>(api, "/api/projects", { requestKey: randomUUID(), brief: idea, ...(example ? { exampleId: "notes" } : {}) }); }
+async function research(api: ProjectTestServer, p: Project) { await wait(api, await call<Job>(api, `/api/projects/${p.id}/research`, action(p))); return call<Project>(api, `/api/projects/${p.id}`); }
+test("server-owned profiles persist, reject stale updates and deduplicate retries", async () => {
+  const api = await projectServer();
+  try {
+    const body = { requestKey: randomUUID(), brief: idea }, p = await call<Project>(api, "/api/projects", body);
+    expect((await call<Project>(api, "/api/projects", body)).id).toBe(p.id);
+    const duplicate = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, brief: { ...idea, name: "Other" } }) }); expect(duplicate.status).toBe(409);
+    const updated = await call<Project>(api, `/api/projects/${p.id}`, { expectedVersion: p.version, brief: { ...idea, name: "Updated" } }, "PATCH"); expect(updated.version).toBe(p.version + 1);
+    const stale = await fetch(api.address + `/api/projects/${p.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: p.version, brief: idea }) }); expect(stale.status).toBe(409);
+    const reloaded = new ProjectService(api.options); expect((await reloaded.get(p.id)).brief.name).toBe("Updated");
+  } finally { await api.close(); }
+});
+test("one research job retains Top 5 evidence and missing APKs never become an app", async () => {
+  const api = await projectServer({ apks: false });
+  try {
+    const p = await research(api, await create(api)); expect(p.references.Productivity.apps).toHaveLength(5); expect(p.references.Productivity.scanId).toMatch(/^scan-/);
+    const body = action(p), submitted = await call<Job>(api, `/api/projects/${p.id}/design`, body), waiting = await wait(api, submitted);
+    expect(waiting.status).toBe("waiting_inputs"); expect(waiting.missingInputs).toHaveLength(5);
+    expect((await call<Job>(api, `/api/projects/${p.id}/design`, body)).id).toBe(submitted.id);
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull(); expect(api.counts().analysisCalls).toBe(0);
+  } finally { await api.close(); }
+});
+test("initial conflicts require explicit valid user choices before a design exists", async () => {
+  const api = await projectServer();
+  try {
+    let p = await research(api, await create(api)); const waiting = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    expect(waiting.status).toBe("waiting_user"); p = await call<Project>(api, `/api/projects/${p.id}`); expect(p.designId).toBeNull(); expect(p.pendingDecision?.kind).toBe("merge_choices");
+    if (p.pendingDecision?.kind !== "merge_choices") throw new Error("Missing conflicts");
+    const decision = p.pendingDecision, route = `/api/projects/${p.id}/decisions/${decision.id}/confirm`;
+    const invalid = await fetch(api.address + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...action(p), selections: [{ conflict_id: "choice-save", option_id: "unknown" }] }) }); expect(invalid.status).toBe(422);
+    const body = { ...action(p), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }, resumed = await call<Job>(api, route, body);
+    expect((await wait(api, resumed)).status).toBe("succeeded"); expect((await call<Job>(api, route, body)).id).toBe(resumed.id);
+    p = await call<Project>(api, `/api/projects/${p.id}`); const input: any = await call(api, `/api/projects/${p.id}/build-input`);
+    expect(p.needsDesign).toBe(false); expect(input.decisions.chosen_by).toBe("user"); expect(input.developer_design.decisions).toEqual(["option-save-explicit"]);
+    expect(api.counts().analysisCalls).toBe(2);
+  } finally { await api.close(); }
+});
+test("changes are public proposals, selected confirmation preserves the source and supports restore", async () => {
+  const api = await projectServer();
+  try {
+    let p = await create(api, true); const original = p.currentDesignRevision!; const source = await api.designs.get("notes");
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/changes`, { ...action(p), baseRevision: original, text: "change", edits: [] }));
+    p = await call<Project>(api, `/api/projects/${p.id}`); expect(p.currentDesignRevision).toBe(original);
+    if (p.pendingDecision?.kind !== "design_changes") throw new Error("Missing proposal");
+    expect(JSON.stringify(p.pendingDecision)).not.toContain('"operations"');
+    const body = { ...action(p), baseRevision: original, selectedChangeIds: ["change-color"] }, route = `/api/projects/${p.id}/decisions/${p.pendingDecision.id}/confirm`;
+    const confirmed = await call<Job>(api, route, body); await wait(api, confirmed); expect((await call<Job>(api, route, body)).id).toBe(confirmed.id);
+    p = await call<Project>(api, `/api/projects/${p.id}`); const input: any = await call(api, `/api/projects/${p.id}/build-input`);
+    expect(input.developer_design.visual.colors[0].value).toBe("#246B4A"); expect(input.developer_design.features[0].title).toBe("Write notes"); expect((await api.designs.get("notes")).revision).toBe(source.revision);
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/restore`, { ...action(p), baseRevision: p.currentDesignRevision, targetRevision: original }));
+    p = await call<Project>(api, `/api/projects/${p.id}`); expect(p.currentDesignRevision).not.toBe(original); expect((await api.service.buildInput(p.id)).developer_design.visual.colors[0].value).toBe("#315DA8");
+  } finally { await api.close(); }
+});
+test("clarification and unrelated input preserve revisions; profile changes prevent stale builds", async () => {
+  const api = await projectServer();
+  try {
+    let p = await create(api, true); const revision = p.currentDesignRevision;
+    for (const text of ["vague", "unrelated"]) {
+      await wait(api, await call<Job>(api, `/api/projects/${p.id}/changes`, { ...action(p), baseRevision: revision, text, edits: [] })); p = await call<Project>(api, `/api/projects/${p.id}`);
+      expect(p.pendingDecision?.kind).toBe("design_changes"); expect(p.currentDesignRevision).toBe(revision);
+      p = await call<Project>(api, `/api/projects/${p.id}/decisions/${p.pendingDecision!.id}/dismiss`, { expectedVersion: p.version });
+    }
+    p = await call<Project>(api, `/api/projects/${p.id}`, { expectedVersion: p.version, brief: { ...idea, input: "A different app idea" } }, "PATCH");
+    const build = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, { ...action(p), revision })); expect(build.status).toBe("failed"); expect(api.counts().buildCalls).toBe(0);
+  } finally { await api.close(); }
+});
+test("builds use an exact approved revision and downloads verify ownership and hashes (synthetic worker)", async () => {
+  const api = await projectServer();
+  try {
+    let p = await create(api, true); const body = { ...action(p), revision: p.currentDesignRevision }, build = await call<Job>(api, `/api/projects/${p.id}/builds`, body);
+    expect((await wait(api, build)).status).toBe("succeeded"); expect((await call<Job>(api, `/api/projects/${p.id}/builds`, body)).id).toBe(build.id);
+    p = await call<Project>(api, `/api/projects/${p.id}`); expect(p.approvedRevision).toBe(p.currentDesignRevision); expect(p.latestBuild?.designHash).toBe((await api.service.buildInput(p.id)).designHash);
+    const artifact = p.latestBuild!.artifacts[0], response = await fetch(api.address + artifact.url); expect(response.status).toBe(200); expect(response.headers.get("content-type")).toContain("android.package");
+    const other = await create(api, true); expect((await fetch(api.address + artifact.url.replace(p.id, other.id))).status).toBe(404);
+    api.options.build = async () => { throw new Error("fixture retry failure"); };
+    const retry = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, { ...action(p), revision: p.currentDesignRevision })); expect(retry.status).toBe("failed");
+    const retried = await api.service.get(p.id); expect(retried.lastDeliveredBuild?.id).toBe(build.id); expect(retried.lastDeliveredBuild?.status).toBe("succeeded");
+    await write(path.join(api.root, "workflow/builds", build.id, "artifacts/app.apk"), "changed"); expect((await fetch(api.address + artifact.url)).status).toBe(409);
+    const saved = await json(path.join(api.root, "workflow/builds", build.id, "input.json")); expect(saved.revision).toBe(p.currentDesignRevision); expect(semanticHash(saved.developer_design)).toBe(p.latestBuild!.designHash);
+  } finally { await api.close(); }
+});
+test("failed builds preserve approved designs and committed revisions reconcile after interruption", async () => {
+  const api = await projectServer({ buildFailure: true });
+  try {
+    let p = await create(api, true); const build = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, { ...action(p), revision: p.currentDesignRevision })); expect(build.status).toBe("failed");
+    p = await call<Project>(api, `/api/projects/${p.id}`); expect(p.latestBuild?.status).toBe("failed"); expect(p.currentDesignRevision).toBe(p.approvedRevision);
+    const proposal = await api.designs.createProposal(p.designId!, { base_revision: p.currentDesignRevision!, idempotency_key: randomUUID(), text: "change", edits: [] });
+    const requestKey = randomUUID(), jobId = `job-${randomUUID()}`, applied = await api.designs.apply(p.designId!, proposal.id, { base_revision: p.currentDesignRevision!, idempotency_key: requestKey, selected_change_ids: ["change-color"] });
+    await api.service.mutate(p.id, project => { project.version++; project.activeJobId = jobId; }); p = await api.service.raw(p.id);
+    await write(api.service.jobFile(jobId), { id: jobId, projectId: p.id, projectVersion: p.version, type: "confirm", status: "running", phase: "confirm", createdAt: "", updatedAt: "", request: { requestKey }, signature: "fixture" });
+    await new ProjectService(api.options).recover(); p = await api.service.get(p.id); expect(p.currentDesignRevision).toBe(applied.revision); expect(p.activeJobId).toBeNull(); expect((await api.service.job(jobId)).status).toBe("succeeded");
+    const interruptedId = `job-${randomUUID()}`;
+    await api.service.mutate(p.id, project => { project.version++; project.activeJobId = interruptedId; project.latestBuild = { id: interruptedId, revision: project.currentDesignRevision!, designHash: "fixture", status: "running", artifacts: [] }; });
+    p = await api.service.raw(p.id);
+    await write(api.service.jobFile(interruptedId), { id: interruptedId, projectId: p.id, projectVersion: p.version, type: "build", status: "running", phase: "build", createdAt: "", updatedAt: "", request: { requestKey: randomUUID() }, signature: "fixture" });
+    await new ProjectService(api.options).recover(); p = await api.service.get(p.id);
+    expect(p.latestBuild?.status).toBe("failed"); expect(p.activeJobId).toBeNull(); expect((await api.service.job(interruptedId)).error?.code).toBe("interrupted");
+  } finally { await api.close(); }
+});
+test("project API rejects foreign origins, oversized input and fabricated research snapshots", async () => {
+  const api = await projectServer();
+  try {
+    expect((await fetch(api.address + "/api/projects", { headers: { Origin: "https://foreign.example" } })).status).toBe(403);
+    const response = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestKey: randomUUID(), brief: idea, references: {} }) }); expect(response.status).toBe(400); expect((await response.json()).error.code).toBe("invalid_request");
+    const huge = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "x".repeat(70000) }) }); expect(huge.status).toBe(413);
+  } finally { await api.close(); }
+});

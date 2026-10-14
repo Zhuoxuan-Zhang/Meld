@@ -28,6 +28,7 @@ function parse(args: string[]) {
   while (args.length) {
     const key = args.shift()!;
     if (key === '--demo') opts.demo = true;
+    else if (key === '--pause-for-decisions') opts.pauseForDecisions = true;
     else if (key === '--apks') { opts.apks = []; while (args[0] && !args[0].startsWith('--')) opts.apks.push(args.shift()); }
     else if (['--brief', '--run', '--config', '--market-input'].includes(key)) { if (!args[0] || args[0].startsWith('--')) throw new Error(`Missing value ${key}`); opts[key.slice(2)] = args.shift(); }
     else throw new Error(`Unknown argument ${key}`);
@@ -64,6 +65,7 @@ async function execute() {
     const brief = Brief.parse(await json(path.resolve(opts.brief || path.join(root, 'config/brief.notes.json'))));
     await fs.mkdir(run, { recursive: true });
     state = { id: path.basename(run), created_at: new Date().toISOString(), status: 'initializing', config: cfg, stages: {}, calls: [], mode: opts.demo ? 'demo' : 'user_apks', input_plan: opts.demo ? await json(path.join(root, 'config/demo.apps.lock.json')) : opts.apks.map((p: string, i: number) => ({ id: `app${i+1}`, input_source: path.resolve(p), url: '', version: '', package_name: '' })) };
+    state.human_decisions = Boolean(opts.pauseForDecisions);
     if (opts['market-input']) {
       const input = await json(path.resolve(opts['market-input']));
       if (!Array.isArray(input.apps) || input.apps.length !== state.input_plan.length || input.apps.some((a: any) => !/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(a.appId))) throw new Error('Market handoff must match every selected APK');
@@ -135,7 +137,9 @@ async function execute() {
       specs.push(await json(path.join(run, output)));
     }
     await write(path.join(run, 'validation/static-tools.json'), { passed: true, apps: apps.map((a: any) => ({ app_id: a.id, package_name: a.package_name, sha256: a.sha256 })), tools: [...rea.schemas.keys()], rea_revision: fp.tools.lock.rea_commit, limitations: ['Static tools only; upstream verify:android bootstrap failure is separately logged, not counted as passed.'] });
-    await synthesize(run, state, claude, brief, specs);
+    if (await synthesize(run, state, claude, brief, specs) === 'waiting_user') {
+      state.status = 'waiting_user'; state.error = ''; await report(run, state); console.log('Waiting for recorded user conflict choices.'); return;
+    }
     const result = await validateRun(run); state.status = result.status; state.error = result.errors.join('\n');
     await report(run, state);
     console.log(`Output: ${path.join(run, 'final/design.md')}`);

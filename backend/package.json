@@ -1,0 +1,9 @@
+{
+  "name": "meld-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import ../pipeline/node_modules/tsx/dist/loader.mjs src/server.ts",
+    "typecheck": "../frontend/node_modules/.bin/tsc -p tsconfig.json"
+  }
+}

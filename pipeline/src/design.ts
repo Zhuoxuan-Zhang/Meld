@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Claude } from './claude.js';
 import { Comparison, Decisions, UnifiedDesign, Review } from './schemas.js';
-import { write, json, sha, fileSha } from './storage.js';
+import { write, json, sha, fileSha, exists } from './storage.js';
 import { validateComparison, validateDecisions, validateDesign } from './validate.js';
 import { renderDesign } from './render.js';
 import { stage } from './state.js';
@@ -47,7 +47,16 @@ export async function synthesize(run: string, state: any, claude: Claude, brief:
     await write(path.join(dir, 'comparison.json'), comparison); await write(path.join(dir, 'conflicts.json'), comparison.conflicts);
   }, async () => validateComparison(await json(path.join(dir, 'comparison.json')), specs));
   comparison = await json(path.join(dir, 'comparison.json'));
+  if (state.human_decisions && comparison.conflicts.length && !(await exists(path.join(run, 'human-decisions.json')))) return 'waiting_user';
   await stage(run, state, 'decide', ['synthesis/decisions.json'], async () => {
+    if (state.human_decisions) {
+      decisions = comparison.conflicts.length ? Decisions.parse(await json(path.join(run, 'human-decisions.json'))) : {
+        chosen_by: 'user', selections: [], global_consistency: { offline: true, features_within_limit: true, navigation_within_limit: true, compatible: true, explanation: 'No source-app conflicts require a user choice.' },
+      };
+      if (decisions.chosen_by !== 'user') throw new Error('User choices are required for this run');
+      const errors = validateDecisions(decisions, comparison, specs); if (errors.length) throw new Error(errors.join('; '));
+      await write(path.join(dir, 'decisions.json'), decisions); return;
+    }
     const chosen_by = claude.provider === 'codex_cli' ? 'codex_proxy' : claude.provider === 'openai' ? 'openai_proxy' : 'claude_proxy';
     decisions = await claude.ask('decide', await claude.prompt('decide'), { ...base, comparison, chosen_by }, Decisions, d => [...validateDecisions(d, comparison, specs), ...(d.chosen_by === chosen_by ? [] : ['Decision provider identity mismatch'])]);
     await write(path.join(dir, 'decisions.json'), decisions);

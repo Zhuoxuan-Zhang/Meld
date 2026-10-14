@@ -1,0 +1,32 @@
+import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ProjectService } from "./projects";
+import { projectsMiddleware, projectOptionsFromEnv, defaultAvailability } from "./api";
+import { marketApi, marketOptionsFromEnv } from "./adapters/market";
+import { claudeApi, claudeOptionsFromEnv } from "./adapters/claude";
+import { suggestionsApi } from "./adapters/suggestions";
+import { designApi } from "./adapters/design";
+import { send } from "./http";
+import { stopOwnedProcesses } from "../../pipeline/dist/src/integration.js";
+import type { Middleware } from "./http";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), frontendDir = path.join(root, "frontend");
+if (existsSync(path.join(frontendDir, ".env.local"))) process.loadEnvFile(path.join(frontendDir, ".env.local"));
+const env = process.env, options = projectOptionsFromEnv(env, frontendDir), service = new ProjectService(options);
+const middleware: Middleware[] = [projectsMiddleware(service, defaultAvailability(env, frontendDir))];
+const host = { middlewares: { use(handler: Middleware) { middleware.push(handler); } } };
+marketApi({ ...marketOptionsFromEnv(env, frontendDir), onResult: result => options.signals.record(result) }).configureServer(host);
+claudeApi(claudeOptionsFromEnv(env, frontendDir)).configureServer(host);
+suggestionsApi(Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"))).configureServer(host);
+designApi({ root: options.designs.store.root, signals: options.signals, pipeline: { ...options.pipeline, directory: path.join(frontendDir, ".meld-cache/pipeline") }, service: options.designs, exampleId: options.exampleId }).configureServer(host);
+const server = createServer((request, response) => {
+  let index = 0;
+  const next = () => { const handler = middleware[index++]; if (!handler) return send(response, 404, { error: { code: "not_found", message: "Endpoint not found." } }); void Promise.resolve(handler(request, response, next)).catch(() => send(response, 500, { error: { code: "server_error", message: "The request failed." } })); };
+  next();
+});
+const port = Number(env.MELD_API_PORT || 3001);
+server.listen(port, "127.0.0.1", () => console.log(`Meld backend: http://127.0.0.1:${port}`));
+server.on("error", error => { console.error(error.message); process.exitCode = 1; });
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { stopOwnedProcesses(); server.close(); setTimeout(() => process.exit(0), 3000).unref(); });

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { DesignService, pipelineRoot } from "@meld/design-pipeline";
+import { DesignService, pipelineRoot } from "../../pipeline/dist/src/integration.js";
 import { designApi } from "../server/design";
 import { SignalsStore } from "../server/signals";
 import { FixtureModel, sourceFixture } from "../../pipeline/tests/fixtures/workbench";
