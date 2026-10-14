@@ -9,10 +9,10 @@ export function researchRunner(options: MarketOptions): ResearchRunner {
   const market = createMarketService(options);
   return async (input, directory, progress) => {
     let brief = { ...input };
-    if (!brief.domains.length) {
+    if (!brief.domains.length || !brief.coreTasks?.length) {
       await progress("Understanding your app idea…");
-      const profile = await modelJson(directory, "profile", "Interpret the user's app idea into a concise English project profile. Preserve explicit requirements. Suggest one or two specific Google Play search topics. Keep the name short. Do not invent market evidence.", { idea: brief.input, preferences: brief }, z.object({ name: z.string().min(1).max(60), audience: z.string().max(600), purpose: z.string().max(600), goal: z.string().max(600), domains: z.array(z.string().min(1).max(48)).min(1).max(2) }).strict());
-      brief = { ...brief, ...profile, name: brief.name || profile.name, audience: brief.audience || profile.audience, purpose: brief.purpose || profile.purpose, goal: brief.goal || profile.goal, domains: [...new Set(profile.domains.map(canonicalDomain))] };
+      const profile = await modelJson(directory, "profile", "Interpret the user's app idea into a concise English project profile. Preserve explicit requirements. Identify the actual core user tasks for this product category and applicable screen-state kinds; do not impose notes tasks on games or trackers. Suggest one or two specific Google Play search topics. Keep the name short. Do not invent market evidence.", { idea: brief.input, preferences: brief }, z.object({ name: z.string().min(1).max(60), audience: z.string().max(600), purpose: z.string().max(600), goal: z.string().max(600), domains: z.array(z.string().min(1).max(48)).min(1).max(2), coreTasks: z.array(z.string().min(1).max(80)).min(2).max(12), requiredStates: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).min(1).max(6) }).strict());
+      brief = { ...brief, ...profile, name: brief.name || profile.name, audience: brief.audience || profile.audience, purpose: brief.purpose || profile.purpose, goal: brief.goal || profile.goal, domains: brief.domains.length ? brief.domains : [...new Set(profile.domains.map(canonicalDomain))], coreTasks: brief.coreTasks || profile.coreTasks, requiredStates: brief.requiredStates || profile.requiredStates };
     }
     const references = [];
     for (const domain of brief.domains) {

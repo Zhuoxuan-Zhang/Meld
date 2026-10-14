@@ -10,9 +10,9 @@ import type { MarketResult } from "../../shared/market";
 import type { Project, Job, Brief, ChangeProposal, Build, Conflict } from "../../shared/contracts";
 
 const key = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/);
-export const BriefInput = z.object({ name: z.string().max(60).default(""), input: z.string().trim().min(1).max(6000), audience: z.string().max(600).default(""), purpose: z.string().max(600).default(""), goal: z.string().max(600).default(""), style: z.enum(["warm", "sage", "ink"]).default("warm"), domains: z.array(z.string().trim().min(1).max(48)).max(8).default([]) }).strict();
+export const BriefInput = z.object({ name: z.string().max(60).default(""), input: z.string().trim().min(1).max(6000), audience: z.string().max(600).default(""), purpose: z.string().max(600).default(""), goal: z.string().max(600).default(""), style: z.enum(["warm", "sage", "ink"]).default("warm"), domains: z.array(z.string().trim().min(1).max(48)).max(8).default([]), coreTasks: z.array(z.string().trim().min(1).max(80)).min(1).max(12).optional(), requiredStates: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).min(1).max(6).optional() }).strict();
 export const CreateProject = z.object({ requestKey: key, brief: BriefInput, exampleId: key.optional() }).strict();
-export const FeaturePreferences = z.object({ selections: z.record(z.string().min(1).max(240), z.array(z.string().min(1).max(240)).max(20)), customRequests: z.array(z.object({ id: key, name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(20) }).strict();
+export const FeaturePreferences = z.object({ selections: z.record(z.string().min(1).max(240), z.array(z.string().min(1).max(240)).max(20)), customRequests: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,239}$/), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(20) }).strict();
 export const PatchProject = z.object({ expectedVersion: z.number().int().positive(), brief: BriefInput.optional(), featurePreferences: FeaturePreferences.optional() }).strict();
 export const Action = z.object({ requestKey: key, expectedVersion: z.number().int().positive() }).strict();
 export const ChangeAction = Action.extend({ baseRevision: key, text: z.string().max(6000).default(""), edits: ChangeRequest.shape.edits });
@@ -124,7 +124,7 @@ export class ProjectService {
     try { return await json(this.jobFile(id)); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new WorkbenchError("not_found", "This task was not found.", 404); throw error; }
   }
   async saveJob(job: StoredJob) { job.updatedAt = new Date().toISOString(); await write(this.jobFile(job.id), job); }
-  async job(id: string): Promise<Job> { const { request: _request, signature: _signature, projectVersion: _version, pipelineJobId: _pipeline, internalJobId: _internal, ...job } = await this.storedJob(id); return job; }
+  async job(id: string): Promise<Job> { const stored = await this.storedJob(id); if (stored.pipelineJobId && !["succeeded", "failed"].includes(stored.status)) { const current = await this.pipeline.get(stored.pipelineJobId); stored.progress = current.progress; stored.phase = current.phase; } const { request: _request, signature: _signature, projectVersion: _version, pipelineJobId: _pipeline, internalJobId: _internal, ...job } = stored; return job; }
   launch(work: () => Promise<void>) { const task = Promise.resolve().then(work); this.tasks.add(task); void task.finally(() => this.tasks.delete(task)).catch(() => undefined); }
   async idle() { while (this.tasks.size) await Promise.allSettled([...this.tasks]); }
   async start(id: string, type: Job["type"], input: z.infer<typeof Action> & Record<string, unknown>, work: (job: StoredJob) => Promise<void>) {
@@ -177,14 +177,14 @@ export class ProjectService {
       const catalog = buildCatalog(project.brief.domains, project.references, project.featurePreferences.selections);
       const chosen = catalog.flatMap(app => app.features.filter(f => project.featurePreferences.selections[app.id]?.includes(f.id))).map(({ id, name, description }) => ({ id, name, description }));
       const featureRequests = [...new Map([...chosen, ...project.featurePreferences.customRequests].map(feature => [feature.id, feature])).values()];
-      const pipeline = await this.pipeline.submit(DesignInput.parse({ request_key: job.id, scan_ids: Object.values(project.references).map(scan => scan.scanId), brief: { name: project.brief.name || "My app", audience: project.brief.audience, purpose: project.brief.purpose || project.brief.input.slice(0, 600), goal: project.brief.goal, style: project.brief.style },
+      const pipeline = await this.pipeline.submit(DesignInput.parse({ request_key: job.id, scan_ids: Object.values(project.references).map(scan => scan.scanId), brief: { name: project.brief.name || "My app", audience: project.brief.audience, purpose: project.brief.purpose || project.brief.input.slice(0, 600), goal: project.brief.goal, style: project.brief.style, coreTasks: project.brief.coreTasks, requiredStates: project.brief.requiredStates },
         preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: featureRequests.map(f => f.id), feature_requests: featureRequests }));
       job.pipelineJobId = pipeline.id; await this.saveJob(job); await this.watchPipeline(job);
     });
   }
   async watchPipeline(job: StoredJob) {
     while (true) {
-      const pipeline = await this.pipeline.get(job.pipelineJobId!); job.status = pipeline.status; job.phase = pipeline.phase; job.missingInputs = pipeline.missing_apps;
+      const pipeline = await this.pipeline.get(job.pipelineJobId!); job.status = pipeline.status; job.phase = pipeline.phase; job.progress = pipeline.progress; job.missingInputs = pipeline.missing_apps;
       if (pipeline.status === "failed") throw new WorkbenchError(pipeline.error?.code || "analysis_failed", pipeline.error?.message || "The reference analysis did not finish.", 502);
       if (pipeline.status === "waiting_user") {
         let conflicts = pipeline.conflicts as Conflict[];

@@ -7,6 +7,7 @@ import type { ProjectOptions } from "./projects";
 import { SignalsStore } from "./adapters/signals";
 import { marketOptionsFromEnv, createMarketService } from "./adapters/market";
 import { researchRunner } from "./research";
+import { apkAcquirer } from "./apk-download";
 import { androidBuildRunner } from "./build";
 import { explainConflicts } from "./choices";
 import { readBody, send } from "./http";
@@ -15,9 +16,9 @@ import type { Middleware } from "./http";
 export function projectOptionsFromEnv(env: Record<string, string | undefined>, frontendDir: string): ProjectOptions {
   const cache = path.join(frontendDir, ".meld-cache"), root = path.dirname(frontendDir);
   return { directory: path.join(cache, "workflow"), designs: new DesignService(pipelineRoot, path.join(cache, "designs")), signals: new SignalsStore(path.join(cache, "signals")),
-    pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG) },
+    pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG), acquireApk: env.MELD_APK_AUTO_DOWNLOAD === "false" ? undefined : apkAcquirer({ aapt: env.MELD_AAPT || path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "build-tools/35.0.0/aapt2") }) },
     exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
-    build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android") }) };
+    build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android"), nativeSmoke: env.MELD_NATIVE_SMOKE_PROJECT && env.MELD_NATIVE_SMOKE_ADB ? { projectId: env.MELD_NATIVE_SMOKE_PROJECT, script: path.join(root, "frontend/tests/puzzle-native-smoke.py"), adb: env.MELD_NATIVE_SMOKE_ADB, serial: env.MELD_NATIVE_SMOKE_SERIAL || "emulator-5580", output: path.join(frontendDir, "qa-screenshots/puzzle-harbor") } : undefined }) };
 }
 export function projectsMiddleware(service: ProjectService, availability?: () => Promise<Record<string, unknown>>): Middleware {
   let recovering: Promise<void> | undefined;

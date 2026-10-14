@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { DesignService } from '../src/workbench/service.js';
 import { DesignJobs } from '../src/workbench/jobs.js';
 import { applyOperations, planErrors, selectedOperations } from '../src/workbench/changes.js';
-import { designErrors, readableErrors, semanticHash } from '../src/workbench/validation.js';
+import { designErrors, readableErrors, semanticHash, paletteErrors } from '../src/workbench/validation.js';
 import { RevisionData, UserDocument, ChangeRequest } from '../src/workbench/schemas.js';
 import { json, write } from '../src/storage.js';
 import { comparison, fixtureData, fixturePlan, FixtureModel, op, readable, sourceFixture } from './fixtures/workbench.js';
@@ -128,4 +128,11 @@ describe('interactive design boundaries and revision safety (synthetic models)',
     const p = await service.createProposal('notes', request()); await service.apply('notes', p.id, { base_revision: initial.revision, idempotency_key: randomUUID(), selected_change_ids: ['change-title'] });
     const saved = await service.store.revision('notes'); const html = await fs.readFile(path.join(saved.dir, 'user-doc.html'), 'utf8'); expect(html).toContain('&lt;img'); expect(html).not.toContain('<img src=x');
   });
+});
+
+it('checks both named game palettes without accepting unreadable colors', () => {
+  const colors = ['Light', 'Dark'].flatMap(theme => [{ role: `${theme} background`, value: '#FFFFFF' }, { role: `${theme} surface`, value: '#FFFFFF' }, { role: `${theme} text`, value: '#17202A' }, { role: `${theme} accent and focus`, value: '#2357C6' }, { role: `${theme} on-accent`, value: '#FFFFFF' }]);
+  expect(paletteErrors(colors)).toEqual([]);
+  colors.find(color => color.role === 'Dark text')!.value = '#FFFFFF';
+  expect(paletteErrors(colors)).toContain('Insufficient contrast dark textPrimary/background');
 });

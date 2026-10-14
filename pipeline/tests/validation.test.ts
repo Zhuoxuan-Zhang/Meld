@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { validateSpecData, validateDecisions, validateDesign, validateEvidence, validateComparison, validateRun } from '../src/validate.js';
 import { checkApk } from '../src/resources.js';
+import { renderDesign } from '../src/render.js';
+import { controls } from '../src/workbench/changes.js';
 import { fileSha, inside, execLogged, redact } from '../src/storage.js';
 
 const app = { id: 'a', sha256: 'hash', package_name: 'example.a' };
@@ -141,4 +143,24 @@ it('validates fallback method text against the retained disassembled class bytes
   expect(await validateEvidence(root,[e])).toEqual([]);
   await writeFile(path.join(root,'class.smali'),'.class Ldifferent;');
   expect((await validateEvidence(root,[e])).join()).toContain('Invalid derived smali');
+});
+
+it('validates game tasks and required states from the brief without inventing notes behavior', () => {
+  const d = design(); d.scope.core_tasks = ['play', 'save', 'resume'];
+  d.pages[0].states = d.pages[0].states.filter((s: any) => ['normal', 'error'].includes(s.kind));
+  const brief = { max_features: 5, max_navigation: 3, core_tasks: ['play', 'save', 'resume'], required_states: ['normal', 'error'] };
+  expect(validateDesign(d, brief, decisions(), [spec()])).toEqual([]);
+  d.scope.core_tasks = ['save', 'resume'];
+  expect(validateDesign(d, brief, decisions(), [spec()])).toContain('Missing core task play');
+});
+
+it('renders game palettes and accent controls without inherited notes context', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'game-render-'));
+  const d = design(); d.title = 'Puzzle Harbor';
+  d.visual.colors = [{ role: 'Light background', value: '#F7F8FA' }, { role: 'Light text', value: '#18212B' }, { role: 'Light primary and focus', value: '#2357C6' }, { role: 'Light on-primary', value: '#FFFFFF' }];
+  await renderDesign(dir, d);
+  const html = await readFile(path.join(dir, 'wireframes.html'), 'utf8');
+  expect(html).toContain('--accent:#2357C6');
+  expect(html).not.toContain('normal · Notes');
+  expect(controls({ design: d, brief: {}, decisions: { selections: [] } } as any).find(control => control.id === 'primary-color')?.value).toBe('#2357C6');
 });

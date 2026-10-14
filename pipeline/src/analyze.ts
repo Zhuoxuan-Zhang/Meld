@@ -78,7 +78,7 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
   context[1].observation = { app_class_names: names, full_inventory_path: context[1].evidence.result_path, limitation: 'Framework/support/library classes omitted from initial context; full raw inventory is retained.' };
   }
   const prompt = await claude.prompt('analyze');
-  const sourceCompletion = 'For source specifications, complete means substantial static documentation of create/edit/save/find/reopen with at least two distinct method-supported core behaviors and explicit coverage gaps. It does not require all optional organization/deletion callbacks, full-app coverage, verified runtime results, or every empty-note rule. Missing core evidence still requires partial; unsupported facts must be corrected. The closed-flow requirement applies to the proposed unified design, not every reference-app behavior.';
+  const sourceCompletion = 'For source specifications, complete means substantial static documentation of the core_tasks explicitly listed for this reference, with at least two distinct method-supported core behaviors and explicit coverage gaps. Optional behaviors mentioned in scope, unconfirmed caller wiring, initial-data origins and target screen-state requirements are not additional required core tasks. Complete is scoped static documentation, never full-app or runtime verification. An entirely undocumented core task or missing method evidence requires partial; unsupported facts must be corrected or marked unknown. The closed-flow and full lifecycle requirements apply to the proposed unified design, not every reference-app behavior.';
   let plan: any = resumedPlan;
   const checkpoint = async (next_round: number, spec_ready = false) => {
     const cp = { apk_sha256: app.sha256, fingerprint: claude.state.fingerprint.digest, next_round, spec_ready, evidence, context, plan };
@@ -88,8 +88,19 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
     claude.state.collections[app.id] = { path: path.relative(run, cpPath), sha256: sha(JSON.stringify(cp, null, 2) + '\n') };
     await write(path.join(run, 'run.json'), claude.state);
   };
+  const toolSchemas = { ...Object.fromEntries(rea.schemas), inspect_android_bytecode: { description: 'App-local APKtool method disassembly, distinct from REA Java output. Use inventoried class and method names when Java decompilation is missing or contradicts mutations (for example Kotlin default-argument masks). Preserves APK and raw class hashes. A selector must identify exactly one method; overloaded selectors may fail honestly.', inputSchema: { type: 'object', properties: { class_name: { type: 'string' }, method_name: { type: 'string' } }, required: ['class_name', 'method_name'] } } };
   const executeActions = async (actions: any[]) => {
     for (const action of actions.slice(0, 20)) {
+      if (action.tool === 'inspect_android_bytecode') {
+        const dir = path.join(stat, `bytecode-${++count}`);
+        try {
+          const body = await extractSmaliMethod(app.path, action.class_name, action.method_name, run, dir, cfg);
+          const rawPath = path.join(dir, 'method.json'); await write(rawPath, body);
+          const e: EvidenceT = { id: `${app.id}-bytecode-${attempt}-${count}`, app_id: app.id, apk_sha256: app.sha256, tool: 'apktool_smali_method', parameters: { path: app.path, class_name: action.class_name, method_name: action.method_name }, result_path: path.relative(run, rawPath), result_sha256: await fileSha(rawPath), locator: '/method_text', limitations: body.limitations };
+          evidence.push(e); context.push({ evidence: e, observation: clipped(body) });
+        } catch (error) { await write(path.join(dir, 'failure.json'), { error: redact(String(error)) }); context.push({ limitation: `Bytecode unavailable for ${action.class_name}.${action.method_name}: ${redact(String(error))}` }); }
+        continue;
+      }
       if (action.tool === 'read_artifact') {
         const p = inside(path.join(dir, 'static'), path.join(run, action.path));
         const real = await fs.realpath(p); inside(path.join(dir, 'static'), real);
@@ -117,7 +128,7 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
   for (let round = startRound; !specReady && round < cfg.max_tool_rounds; round++) {
     await checkpoint(round);
     await write(path.join(attempts, 'evidence-working.json'), evidence);
-    plan = await claude.ask(`${app.id}-plan-${round}`, prompt, { mode: 'plan', app: { id: app.id, package_name: app.package_name, version: app.version, sha256: app.sha256 }, brief, round, prior_plan: plan || null, evidence: context, tool_schemas: Object.fromEntries(rea.schemas),scoped_completion_criteria:sourceCompletion }, Plan);
+    plan = await claude.ask(`${app.id}-plan-${round}`, prompt, { mode: 'plan', app: { id: app.id, package_name: app.package_name, version: app.version, sha256: app.sha256 }, brief, round, prior_plan: plan || null, evidence: context, tool_schemas: toolSchemas,scoped_completion_criteria:sourceCompletion }, Plan);
     await write(path.join(attempts, `analysis-plan-${round}.json`), plan);
     if (round === 0) await write(path.join(dir, 'analysis-plan.json'), plan);
     if (plan.ready_for_spec && round > 0) { await checkpoint(round + 1, true); break; }
@@ -137,7 +148,7 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
     await write(path.join(attempts, `review-${round}.json`), review);
     if (review.passed && !review.issues.some((x: any) => x.severity === 'blocking')) break;
     if (round === 2) { spec.status = 'partial'; break; }
-    const supplementPlan = await claude.ask(`${app.id}-supplement-${round}`, prompt, { mode: 'plan', app: { id: app.id, package_name: app.package_name, version: app.version, sha256: app.sha256 }, brief, prior_spec: spec, review, evidence: context, tool_schemas: Object.fromEntries(rea.schemas), instruction: 'Request only targeted missing evidence for blocking review issues. Read remaining saved method windows before declaring their behavior unsupported. Use real inventoried selectors; at most twelve actions.' }, Plan);
+    const supplementPlan = await claude.ask(`${app.id}-supplement-${round}`, prompt, { mode: 'plan', app: { id: app.id, package_name: app.package_name, version: app.version, sha256: app.sha256 }, brief, prior_spec: spec, review, evidence: context, tool_schemas: toolSchemas, instruction: 'Request only targeted missing evidence for blocking review issues. Read remaining saved method windows before declaring their behavior unsupported. Use real inventoried selectors; at most twelve actions.' }, Plan);
     await write(path.join(attempts, `supplement-plan-${round}.json`), supplementPlan);
     await executeActions(supplementPlan.actions);
     await checkpoint(cfg.max_tool_rounds, true);

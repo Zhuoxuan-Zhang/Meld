@@ -12,6 +12,7 @@ import { FixtureModel, sourceFixture, fixtureData } from "../../pipeline/tests/f
 import { scannerReport } from "./market-data";
 import { fromScannerReport } from "../../shared/market";
 import type { ProjectOptions, BuildRunner } from "../../backend/src/projects";
+import type { ApkAcquirer } from "../../backend/src/apk-download";
 import type { ApiHost } from "../../backend/src/http";
 
 export const idea = { name: "Pocket Notes", input: "An offline notebook for capturing and finding ideas.", audience: "People keeping personal notes", purpose: "Capture and find ideas offline", goal: "Keep ideas close", style: "sage", domains: ["Productivity"] };
@@ -31,7 +32,7 @@ export class ProjectModel extends FixtureModel {
 export async function notebookFixture(dir: string) {
   const data = await sourceFixture(dir); data.design.title = "Pocket Notes"; data.design.features[0].title = "Write notes"; await write(path.join(dir, "final/final-design.json"), data.design); return data;
 }
-export async function projectServer({ apks = true, buildFailure = false }: { apks?: boolean; buildFailure?: boolean } = {}) {
+export async function projectServer({ apks = true, buildFailure = false, listedFeatures = false, acquireApk }: { apks?: boolean; buildFailure?: boolean; listedFeatures?: boolean; acquireApk?: ApkAcquirer } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "meld-project-test-")), model = new ProjectModel(), designs = new DesignService(pipelineRoot, path.join(root, "designs"), model), signals = new SignalsStore(path.join(root, "signals"));
   await notebookFixture(path.join(root, "example")); await designs.initialize("notes", path.join(root, "example"), {});
   const apkDir = path.join(root, "apks"); if (apks) {
@@ -46,8 +47,12 @@ export async function projectServer({ apks = true, buildFailure = false }: { apk
     return { artifacts: metadata, validation: { build: true, unitTests: true, lint: true, runtimeVerified: false, limitations: ["Synthetic worker fixture, not Android compilation or runtime evidence."] } };
   };
   const options: ProjectOptions = { directory: path.join(root, "workflow"), designs, signals, exampleId: "notes", build,
-    research: async brief => ({ brief, references: [fromScannerReport("Productivity", scannerReport("Productivity"))] }),
-    pipeline: { directory: path.join(root, "pipeline"), apkDir, runner: async task => {
+    research: async brief => {
+      const scan = fromScannerReport("Productivity", scannerReport("Productivity"));
+      if (listedFeatures) for (const app of scan.apps) app.listedFeatures = { items: [{ name: "Quick notes", detail: "Capture ideas quickly." }, { name: "Find notes", detail: "Find an existing note." }, { name: "Organize notes", detail: "Keep related notes together." }], model: "synthetic-fixture", template: "fixture", generatedAt: scan.generatedAt };
+      return { brief, references: [scan] };
+    },
+    pipeline: { directory: path.join(root, "pipeline"), apkDir, acquireApk, runner: async task => {
       analysisCalls++; const market = await json(task.market); const locked = market.apps.map((a: any, i: number) => ({ id: `app${i + 1}`, package_name: a.appId, sha256: a.apk_sha256 }));
       if (!(await exists(path.join(task.run, "human-decisions.json")))) {
         await notebookFixture(task.run); await write(path.join(task.run, "apps.lock.json"), locked);

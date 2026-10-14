@@ -48,13 +48,13 @@ Research can scan two topics; the review suggests features from at most five ran
 | `GET /api/jobs/{jobId}` | Unified progress |
 | `POST /api/jobs/{jobId}/resume` | Recheck reference files and resume analysis |
 
-`brief` includes `input`, `name`, `audience`, `purpose`, `goal`, `style` and `domains`. Only `input` is required when creating it; other fields have defaults. Research can infer an English profile and search topics. `featurePreferences` contains `selections` keyed by reference app ID and `customRequests` as `{id, name, description}`. Public change proposals contain explanations and IDs; compiled patch operations remain internal.
+`brief` includes `input`, `name`, `audience`, `purpose`, `goal`, `style` and `domains`. Only `input` is required when creating it; other fields have defaults. Research can infer an English profile, search topics, category-specific `coreTasks` and applicable `requiredStates`. These optional brief fields also accept explicit product requirements; games are not forced through notes-only tasks. `featurePreferences` contains `selections` keyed by reference app ID and `customRequests` as `{id, name, description}`. Public change proposals contain explanations and IDs; compiled patch operations remain internal.
 
 ## APK analysis and Android builds
 
 Set `MELD_APK_DIR` to standalone `<package.name>.apk` files. Missing files produce resumable `waiting_inputs`; market listings never substitute for static APK evidence. Automatic store APK acquisition is not implemented. Configure pinned REA tools with `npm --prefix pipeline run setup`, or point `MELD_PIPELINE_TOOL_ROOT` at an existing installation.
 
-The new build worker generates Kotlin/Compose implementation and pure-logic JUnit tests from the approved detailed revision, reviews the code, then runs Gradle `assembleDebug`, `testDebugUnitTest` and `lintDebug`. It checks that tests actually ran, validates the APK archive and publishes hashes. Standard Gradle/manifest scaffolding is supplied; application feature code is generated from the design. Each attempt has its own source directory and logs.
+The build worker plans small Kotlin modules and generates each file separately from the approved detailed revision. It runs Gradle `assembleDebug`, `testDebugUnitTest` and `lintDebug`, then reviews the compiled implementation against the design. Repairs update affected files while retaining unchanged modules. Interrupted generation can resume an ordered checkpoint for the same revision and design hash. It checks that tests actually ran, validates the APK archive and publishes hashes. Standard Gradle/manifest scaffolding is supplied; application feature code is generated from the design. Each attempt has its own source directory and logs.
 
 Configure `MELD_ANDROID_SDK` (SDK 35) and `JAVA_HOME` (JDK 17+). The worker produces a **debug APK**. Passing model review and Gradle checks does not establish full runtime behavior; build reports and the UI distinguish device verification. Existing Android source and imported analysis are preserved. A changed design invalidates approval, and an earlier APK is not presented as the current design's result.
 
@@ -79,3 +79,19 @@ API/browser tests use explicit synthetic research, model and build providers. `f
 - The live Android attempt failed implementation review; a subsequent attempt reached the old model timeout. A further retry uses the saved implementation, higher reasoning effort and a longer time allowance. APK compilation and device behavior have **not** been established by these checks. Synthetic build tests validate orchestration, ownership and downloads, not a real generated app.
 
 Current live progress belongs to saved jobs; consult the delivery page and build report rather than treating this verification snapshot as a successful APK result.
+
+See [the three-game run](puzzle-trio-run.md) for the curated 2048, Antimine and LibreSudoku experiment, source-analysis scopes and runtime verification results.
+
+### Market references and feature confirmation
+
+After research, the review page immediately shows up to five distinct live reference apps, ordered by market-signal score (then scanner rank). The order stays fixed while the user selects features. Every available listing feature is shown under its source app, with listing links, score, rating and explicit feature provenance. These are scanner recommendations, not store chart positions; partial results and keyword fallbacks remain labeled.
+
+Users select features, customize their names and behavior, or add free-text features before clicking **Confirm features and generate design**. The frontend saves preferences through `PATCH /api/projects/:id`, then starts `POST /api/projects/:id/design`. A customized listing feature retains its source feature ID and APK preference; its custom request overrides the original wording in the backend's requested features. Research itself never starts design generation. Design conflicts, when present, are resolved within the same review page.
+
+### APK acquisition and visible progress
+
+Design jobs check configured local APKs first, then automatically download missing references from Aptoide's public metadata API. Downloaded files stay inside the owning job's ignored `apks/` directory, preserving read-only input folders. `MELD_APK_AUTO_DOWNLOAD=false` disables acquisition; `MELD_AAPT` selects the Android package-inspection executable (default SDK `build-tools/35.0.0/aapt2`). Downloads use HTTPS with restricted hosts/redirects, a three-minute timeout and a 256 MiB limit. The worker checks provider size/MD5, archive validity, actual manifest package and records SHA-256/source provenance before reuse. Mirror trust labels are not independent publisher signature verification. API reference: [Aptoide metadata documentation](https://ws2.aptoide.com/api/7/app/getMeta?info=1).
+
+`GET /api/jobs/:id` now returns `progress`: per-reference download status and bytes, app-analysis status, and download/analysis/comparison/merge/readable-document steps. Analysis and synthesis progress is derived from real `analysis/run.json` stage checkpoints rather than elapsed-time percentages. The browser shows app titles, ready/analyzed counts, byte progress, source and specific acquisition errors. **Retry failed APK downloads** reuses verified successful downloads in the same job; **Back to feature choices** preserves preferences and exits the paused task. Some packages have no downloadable mirror APK, and split bundles are unsupported; those jobs pause with explicit reasons rather than claiming that analysis is running.
+
+Live acquisition check (2026-10-14): the Image Studio project downloaded and verified Google Photos, InShot and Google Gemini. Aptoide returned no available APK for Picsart and Canva; the job accurately reports 3/5 APKs ready and 0/5 apps analyzed. Browser checks at 1440 and 390 pixels passed for that real project. This verifies acquisition and progress display, not completion of its reference analysis or design.

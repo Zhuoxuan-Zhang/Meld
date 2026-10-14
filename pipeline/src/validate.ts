@@ -134,8 +134,8 @@ export function validateDesign(d: any, brief: any, decisions: any, specs: any[])
     }
     if (!p.states.some((s: any) => s.kind === 'normal')) errors.push(`Missing normal state ${p.id}`);
   }
-  for (const task of ['create', 'edit', 'save', 'find', 'reopen']) if (!d.scope.core_tasks.includes(task)) errors.push(`Missing core task ${task}`);
-  for (const kind of ['empty', 'no_results', 'error', 'delete_confirmation', 'unsaved_changes']) if (!d.pages.some((p: any) => p.states.some((s: any) => s.kind === kind))) errors.push(`Missing design state ${kind}`);
+  for (const task of (brief.core_tasks || ['create', 'edit', 'save', 'find', 'reopen'])) if (!d.scope.core_tasks.includes(task)) errors.push(`Missing core task ${task}`);
+  for (const kind of (brief.required_states || ['empty', 'no_results', 'error', 'delete_confirmation', 'unsaved_changes'])) if (!d.pages.some((p: any) => p.states.some((s: any) => s.kind === kind))) errors.push(`Missing design state ${kind}`);
   for (const s of decisions.selections) if (!d.decisions.includes(s.option_id)) errors.push(`Design omits decision ${s.option_id}`);
   for (const id of d.decisions) if (!decisions.selections.some((s: any) => s.option_id === id)) errors.push(`Unknown design decision ${id}`);
   for (const e of d.entities) { unique(e.fields.map((f: any) => f.name), `entity fields ${e.id}`, errors); if (!e.persistence) errors.push(`Missing persistence ${e.id}`); }

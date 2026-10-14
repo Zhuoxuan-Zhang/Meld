@@ -27,8 +27,8 @@ export const ChangePlan = z.object({
   }).strict()).max(8),
 }).strict();
 export const WorkspaceBrief = z.object({
-  project_name: Text.optional(), market_signals: z.unknown().optional(),
-  target_users: Text, core_tasks: z.array(Text), max_features: z.number().int().min(1).max(20),
+  project_name: Text.optional(), reference_scopes: z.record(z.string(), z.object({ core_tasks: z.array(Text), scope: Text })).optional(), market_signals: z.unknown().optional(),
+  target_users: Text, core_tasks: z.array(Text), required_states: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).optional(), max_features: z.number().int().min(1).max(20),
   max_navigation: z.number().int().min(1).max(8), offline_only: z.literal(true),
   implementation: Text, excluded: z.array(Text), scope: Text,
 }).strict();

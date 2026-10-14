@@ -1,0 +1,60 @@
+{
+  "project_name": "Puzzle Harbor",
+  "target_users": "People who want three offline logic games with clear controls and reliable saved progress",
+  "core_tasks": [
+    "choose_game",
+    "play",
+    "pause",
+    "save",
+    "resume",
+    "restart"
+  ],
+  "required_states": [
+    "normal",
+    "empty",
+    "error",
+    "delete_confirmation",
+    "unsaved_changes"
+  ],
+  "max_features": 5,
+  "max_navigation": 3,
+  "offline_only": true,
+  "implementation": "Android Kotlin / Jetpack Compose; pure Kotlin game engines with testable deterministic randomness and local persisted state",
+  "excluded": [
+    "accounts",
+    "cloud sync",
+    "online leaderboards",
+    "ads",
+    "payments",
+    "AI players",
+    "2048 automatic replay",
+    "custom puzzle import/export",
+    "Killer Sudoku",
+    "12x12 Sudoku",
+    "advanced no-guessing Minesweeper generation"
+  ],
+  "scope": "One coherent offline puzzle arcade with three separate modes based on the user-selected APK references: classic 4x4 2048; 9x9 Minesweeper with 10 mines and a safe first revealed cell; classic 9x9 Sudoku with uniquely solvable validated puzzles. Preserve each game\u2019s own rules. Main navigation Games, Statistics, Settings; game boards are child pages. Support new game, pause, confirmed restart, saved progress per mode, shared light/dark theme, accessible touch controls, clear win/loss presentation and local statistics. 2048 swipe plus accessible direction buttons and one-step undo; Minesweeper reveal/flag mode with flood reveal; Sudoku immutable givens, number entry, erase, pencil marks and undo. Statistics counts completed outcomes once. Retain saved boards across process restarts. Concrete rules and recovery should be precise but avoid hypothetical distributed-storage concurrency requirements; single-user local app. Colors, typography, spacing, board geometry, focus and Back behavior must be specified. All three modes must appear in the final design; do not silently discard a game when aligning reference features.",
+  "reference_scopes": {
+    "org.andstatus.game2048": {
+      "core_tasks": [
+        "play",
+        "undo"
+      ],
+      "scope": "Analyze 2048 movement, merge/spawn logic and undo/history as this reference\u2019s contribution to the proposed arcade. Saving, replay, AI, themes and lifecycle recovery may be examined but missing evidence must remain explicit scoped omissions; no claim of full-app coverage or runtime verification."
+    },
+    "dev.lucanlm.antimine": {
+      "core_tasks": [
+        "reveal",
+        "flag"
+      ],
+      "scope": "Analyze Minesweeper cell reveal, mine/neighbor rules, flood reveal and flag input as this reference\u2019s contribution. Scheduling, themes, statistics, no-guess guarantees and durable save may be inspected but are optional source coverage; unconfirmed behaviors remain unknown. No 2048 or Sudoku behavior is expected in this reference."
+    },
+    "com.kaajjo.libresudoku": {
+      "core_tasks": [
+        "enter_number",
+        "pencil_marks"
+      ],
+      "scope": "Analyze Sudoku number input, immutable clues, candidate/pencil marks and rule checking as this reference\u2019s contribution. Puzzle generation, statistics, themes, durable saving and undo may be inspected but are optional source coverage and must remain unknown without evidence. No other game type is expected in this source."
+    }
+  }
+}

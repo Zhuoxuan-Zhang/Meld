@@ -19,19 +19,20 @@ export async function renderDesign(dir: string, d: any) {
   let md = `# ${d.title}\n\n**Proposed design** — ${d.status}. Derived from final-design.json (${digest}). Reference app runtime behavior was not verified.\n\n`;
   for (const [name, value] of Object.entries(d)) if (!['title', 'status'].includes(name)) md += section(name.replace(/_/g, ' '), value);
   await write(path.join(dir, 'design.md'), md);
+  const notesContext = d.entities.some((entity: any) => /^note$/i.test(entity.name) || entity.id === "entity-note");
   const component = (c: any) => {
     const t = c.type.toLowerCase(); const text = esc(c.text);
-    if (t.includes('textfield') || t.includes('input') || t.includes('editor')) return `<div class="field ${t.includes('editor') || /body|content/i.test(c.id) ? 'body' : ''}">${text || (t.includes('search') ? 'Search notes' : 'Write here…')}</div>`;
+    if (t.includes('textfield') || t.includes('input') || t.includes('editor')) return `<div class="field ${t.includes('editor') || /body|content/i.test(c.id) ? 'body' : ''}">${text || (t.includes('search') ? (notesContext ? 'Search notes' : 'Search') : 'Enter a value…')}</div>`;
     if (t.includes('button') || t.includes('action')) return `<div class="button" aria-label="${text}">${text}</div>`;
     if (t.includes('topbar') || t.includes('toolbar')) return `<div class="toolbar">${text}</div>`;
-    if (t.includes('list') || t.includes('card')) return `<div class="note"><strong>${text || 'Your notes'}</strong><div class="line"></div><div class="line short"></div></div>`;
+    if (t.includes('list') || t.includes('card')) return `<div class="note"><strong>${text || (notesContext ? 'Your notes' : 'Items')}</strong><div class="line"></div><div class="line short"></div></div>`;
     if (t.includes('navigation')) return `<div class="nav">${text}</div>`;
     return text ? `<div class="label">${text}</div>` : '';
   };
   const cards = d.pages.flatMap((p: any) => {
     const shell=p.states.find((s:any)=>s.id.endsWith('-shell'));
     return p.states.filter((s:any)=>s!==shell).flatMap((s:any)=>{
-      const contexts=p.id==='page-collection'&&s.id!=='collection-no-results'||p.id==='page-editor'&&['editor-normal','editor-empty'].includes(s.id)?['Notes','Deleted']:p.id==='page-editor'&&['editor-delete-confirmation','editor-review-error'].includes(s.id)?['Deleted']:['Notes'];
+      const contexts=p.id==='page-collection'&&s.id!=='collection-no-results'||p.id==='page-editor'&&['editor-normal','editor-empty'].includes(s.id)?['Notes','Deleted']:p.id==='page-editor'&&['editor-delete-confirmation','editor-review-error'].includes(s.id)?['Deleted']:[notesContext ? 'Notes' : ''];
       return contexts.map(collection=>{
         const deleted=collection==='Deleted',ids=new Set([...(shell?.component_ids||[]),...s.component_ids]);
         const review=s.id.includes('review-'),initial=s.id==='editor-blocking';
@@ -56,11 +57,17 @@ export async function renderDesign(dir: string, d: any) {
           if(p.id==='page-search'&&s.kind==='empty'&&c.id==='search-clear')return false;
           return true;
         }).map((c:any)=>({...c,text:sample(c.text).replace('New note / Retry new note','New note').replace('Add label / Update name','Add label'),type:deleted&&c.id==='editor-labels'?'Text':c.type}));
-        return `<article data-page="${esc(p.id)}" data-state="${esc(s.kind)}" data-state-id="${esc(s.id)}" data-collection="${collection}"><h2>${esc(p.title)} <small>${esc(s.kind)} · ${collection}</small></h2><div class="phone"><div class="status">9:41 <span>● ▰</span></div><div class="screen">${visible.map(component).join('')}${stateMessage?`<div class="message">${esc(sample(stateMessage))}</div>`:''}</div></div><p class="caption">${esc(s.condition)} · Illustrative ${collection} state; sample content.</p></article>`;
+        return `<article data-page="${esc(p.id)}" data-state="${esc(s.kind)}" data-state-id="${esc(s.id)}" data-collection="${collection}"><h2>${esc(p.title)} <small>${esc(s.kind)}${collection ? ' · ' + collection : ''}</small></h2><div class="phone"><div class="status">9:41 <span>● ▰</span></div><div class="screen">${visible.map(component).join('')}${stateMessage?`<div class="message">${esc(sample(stateMessage))}</div>`:''}</div></div><p class="caption">${esc(s.condition)} · Illustrative ${collection ? collection + ' ' : ''}state; sample content.</p></article>`;
       });
     });
   }).join('');
   const colors = Object.fromEntries(d.visual.colors.map((c: any) => [c.role.toLowerCase(), c.value]));
+  const lightColor = (pattern: RegExp) => d.visual.colors.find((c: any) => /light/i.test(c.role) && pattern.test(c.role))?.value;
+  colors.primary ||= d.visual.colors.find((c: any) => /light/i.test(c.role) && /primary|accent/i.test(c.role) && !/on[-_ ]?primary/i.test(c.role))?.value;
+  colors.primary ||= d.visual.colors.find((c: any) => /primary|accent/i.test(c.role) && !/on[-_ ]?primary/i.test(c.role))?.value;
+  colors.background ||= lightColor(/background/i);
+  colors.surface ||= lightColor(/surface/i);
+  colors.on_surface ||= lightColor(/^light text$|on[-_ ]?surface/i);
   colors.on_surface ||= colors.onsurface;
   const safeColor = (v: any, fallback: string) => /^#[a-f\d]{3,8}$/i.test(v ?? '') ? v : fallback;
   await write(path.join(dir, 'wireframes.html'), `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(d.title)} — Proposed design</title><style>

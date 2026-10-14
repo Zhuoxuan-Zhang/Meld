@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { write, json, semanticHash } from "../../pipeline/dist/src/integration.js";
+import { mkdir } from "node:fs/promises";
+import { write, json, semanticHash, fileSha } from "../../pipeline/dist/src/integration.js";
 import { ProjectService } from "../../backend/src/projects";
-import { projectServer, idea } from "./project-fixtures";
+import { projectServer, idea, zipApk } from "./project-fixtures";
 import type { ProjectTestServer } from "./project-fixtures";
 import type { Project, Job } from "../../shared/contracts";
 
@@ -119,5 +120,23 @@ test("project API rejects foreign origins, oversized input and fabricated resear
     expect((await fetch(api.address + "/api/projects", { headers: { Origin: "https://foreign.example" } })).status).toBe(403);
     const response = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestKey: randomUUID(), brief: idea, references: {} }) }); expect(response.status).toBe(400); expect((await response.json()).error.code).toBe("invalid_request");
     const huge = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "x".repeat(70000) }) }); expect(huge.status).toBe(413);
+  } finally { await api.close(); }
+});
+
+test("automatic APK acquisition exposes per-app failures and retries only missing files (synthetic downloads)", async () => {
+  const calls: string[] = []; let firstFailure = true;
+  const api = await projectServer({ apks: false, acquireApk: async (packageId, file, progress) => {
+    calls.push(packageId); await progress({ status: "running", bytes: 128, totalBytes: 256, source: "Synthetic fixture" });
+    if (firstFailure) { firstFailure = false; throw new Error("Fixture provider has no downloadable APK."); }
+    await mkdir(path.dirname(file), { recursive: true }); zipApk(file); await write(`${file}.provenance.json`, { packageId, sha256: await fileSha(file) });
+    await progress({ status: "completed", bytes: 256 }); return file;
+  } });
+  try {
+    const p = await research(api, await create(api)), started = await call<Job>(api, `/api/projects/${p.id}/design`, action(p)), blocked = await wait(api, started);
+    expect(blocked.status).toBe("waiting_inputs"); expect(blocked.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
+    expect(blocked.progress!.apps.find(app => app.download.status === "failed")!.download.message).toContain("Fixture provider"); expect(api.counts().analysisCalls).toBe(0);
+    const retried = await call<Job>(api, `/api/jobs/${started.id}/resume`, {}), continued = await wait(api, retried);
+    expect(continued.status).toBe("waiting_user"); expect(calls).toHaveLength(6); expect(calls[5]).toBe(calls[0]);
+    expect(continued.progress!.steps.find(step => step.id === "download")!.status).toBe("completed"); expect(continued.progress!.apps.every(app => app.download.status === "completed")).toBe(true);
   } finally { await api.close(); }
 });
