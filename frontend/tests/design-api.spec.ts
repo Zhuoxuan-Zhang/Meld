@@ -81,11 +81,18 @@ test("store-listing feature choices survive the handoff as user preferences", as
     expect(missing.status()).toBe(400);
   } finally { await api.close(); }
 });
-test("APK-ready handoff feeds every ranked package into the runner and imports its design (synthetic downstream)", async ({ request }) => {
-  const apkDir = await mkdtemp(path.join(tmpdir(), "meld-apk-fixture-")); let received: string[] = [];
+test("APK-ready handoff preserves the selection prompt through retry, import and export (synthetic downstream)", async ({ request }) => {
+  const apkDir = await mkdtemp(path.join(tmpdir(), "meld-apk-fixture-")); let received: string[] = [], deliveredScope = "", attempts = 0;
+  const feature = { id: "com.example.notes:quick-notes", name: "Quick notes", description: "Keep personal notes on this device. ".repeat(25) };
   const api = await designServer({ apkDir, runner: async task => {
     const market = await json(task.market); received = market.apps.map((app: { appId: string }) => app.appId);
+    const brief = await json(task.brief);
+    expect(brief.scope).toContain(feature.id); expect(brief.scope).toContain(feature.description);
+    expect(brief.scope.length).toBeGreaterThan(1200);
+    if (++attempts === 1) { deliveredScope = brief.scope; throw new Error("Synthetic interruption after saving the prompt"); }
+    expect(brief.scope).toBe(deliveredScope);
     expect(task.apks).toHaveLength(5); await sourceFixture(task.run);
+    await write(path.join(task.run, "brief.json"), brief);
     await write(path.join(task.run, "synthesis/design-review.json"), { passed: true, issues: [], limitations: ["Synthetic downstream fixture, not REA verification"] });
     const locked = market.apps.map((app: { appId: string; apk_sha256: string }, index: number) => ({ id: `app${index + 1}`, package_name: app.appId, sha256: app.apk_sha256 }));
     await write(path.join(task.run, "apps.lock.json"), locked);
@@ -95,9 +102,13 @@ test("APK-ready handoff feeds every ranked package into the runner and imports i
   try {
     const scan = await api.signals.record(fromScannerReport("Productivity", scannerReport("Productivity")));
     for (const app of scan.apps) execFileSync("python3", ["-c", "import zipfile,sys\nwith zipfile.ZipFile(sys.argv[1],'w') as z:\n z.writestr('AndroidManifest.xml','synthetic');z.writestr('classes.dex','synthetic')", path.join(apkDir, `${app.appId}.apk`)]);
-    const response = await request.post(api.address + "/api/design/pipeline", { data: input(scan.scanId!) });
-    const result = await wait(api.address, (await response.json()).id); expect(result.status).toBe("succeeded"); expect(new Set(received)).toEqual(new Set(scan.apps.map(a => a.appId)));
+    const body = { ...input(scan.scanId!), requested_features: [feature.id], preferences: [{ app_id: "com.example.notes", feature_ids: [feature.id] }], feature_requests: [feature] };
+    const response = await request.post(api.address + "/api/design/pipeline", { data: body });
+    const failed = await wait(api.address, (await response.json()).id); expect(failed.status).toBe("failed");
+    const resumed = await request.post(`${api.address}/api/design/pipeline/${failed.id}/resume`, { data: {} });
+    const result = await wait(api.address, (await resumed.json()).id); expect(result.status).toBe("succeeded"); expect(new Set(received)).toEqual(new Set(scan.apps.map(a => a.appId)));
     const build = await (await request.get(`${api.address}/api/design/designs/${result.design_id}/build-input`)).json(); expect(build.market.apps).toHaveLength(5); expect(build.market.apps.every((a: { apk_sha256: string }) => a.apk_sha256.length === 64)).toBe(true); expect(build.implementation.status).toBe("untracked");
+    expect(build.brief.scope).toBe(deliveredScope); expect(attempts).toBe(2);
   } finally { await api.close(); await rm(apkDir, { recursive: true, force: true }); }
 });
 test("changed signal snapshots and references outside the scan cannot become APK evidence", async ({ request }) => {

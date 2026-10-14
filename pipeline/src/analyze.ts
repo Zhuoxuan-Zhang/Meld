@@ -78,7 +78,7 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
   context[1].observation = { app_class_names: names, full_inventory_path: context[1].evidence.result_path, limitation: 'Framework/support/library classes omitted from initial context; full raw inventory is retained.' };
   }
   const prompt = await claude.prompt('analyze');
-  const sourceCompletion = 'For source specifications, complete means substantial static documentation of create/edit/save/find/reopen with at least two distinct method-supported core behaviors and explicit coverage gaps. It does not require all optional organization/deletion callbacks, full-app coverage, verified runtime results, or every empty-note rule. Missing core evidence still requires partial; unsupported facts must be corrected. The closed-flow requirement applies to the proposed unified design, not every reference-app behavior.';
+  const sourceCompletion = 'For source specifications, complete means substantial static documentation of the supplied brief core_tasks with at least two distinct method-supported core behaviors and explicit coverage gaps. It does not require all optional organization/deletion callbacks, full-app coverage, verified runtime results, or every empty-note rule. Missing core evidence still requires partial; unsupported facts must be corrected. The closed-flow requirement applies to the proposed unified design, not every reference-app behavior.';
   let plan: any = resumedPlan;
   const checkpoint = async (next_round: number, spec_ready = false) => {
     const cp = { apk_sha256: app.sha256, fingerprint: claude.state.fingerprint.digest, next_round, spec_ready, evidence, context, plan };

@@ -21,17 +21,17 @@ export async function renderDesign(dir: string, d: any) {
   await write(path.join(dir, 'design.md'), md);
   const component = (c: any) => {
     const t = c.type.toLowerCase(); const text = esc(c.text);
-    if (t.includes('textfield') || t.includes('input') || t.includes('editor')) return `<div class="field ${t.includes('editor') || /body|content/i.test(c.id) ? 'body' : ''}">${text || (t.includes('search') ? 'Search notes' : 'Write here…')}</div>`;
+    if (t.includes('textfield') || t.includes('input') || t.includes('editor')) return `<div class="field ${t.includes('editor') || /body|content/i.test(c.id) ? 'body' : ''}">${text || (t.includes('search') ? 'Search' : 'Enter a value…')}</div>`;
     if (t.includes('button') || t.includes('action')) return `<div class="button" aria-label="${text}">${text}</div>`;
     if (t.includes('topbar') || t.includes('toolbar')) return `<div class="toolbar">${text}</div>`;
-    if (t.includes('list') || t.includes('card')) return `<div class="note"><strong>${text || 'Your notes'}</strong><div class="line"></div><div class="line short"></div></div>`;
+    if (t.includes('list') || t.includes('card')) return `<div class="note"><strong>${text || 'Your items'}</strong><div class="line"></div><div class="line short"></div></div>`;
     if (t.includes('navigation')) return `<div class="nav">${text}</div>`;
     return text ? `<div class="label">${text}</div>` : '';
   };
   const cards = d.pages.flatMap((p: any) => {
     const shell=p.states.find((s:any)=>s.id.endsWith('-shell'));
     return p.states.filter((s:any)=>s!==shell).flatMap((s:any)=>{
-      const contexts=p.id==='page-collection'&&s.id!=='collection-no-results'||p.id==='page-editor'&&['editor-normal','editor-empty'].includes(s.id)?['Notes','Deleted']:p.id==='page-editor'&&['editor-delete-confirmation','editor-review-error'].includes(s.id)?['Deleted']:['Notes'];
+      const contexts=p.id==='page-collection'&&s.id!=='collection-no-results'||p.id==='page-editor'&&['editor-normal','editor-empty'].includes(s.id)?['Notes','Deleted']:p.id==='page-editor'&&['editor-delete-confirmation','editor-review-error'].includes(s.id)?['Deleted']:[d.scope.core_tasks.includes('save') ? 'Notes' : 'App'];
       return contexts.map(collection=>{
         const deleted=collection==='Deleted',ids=new Set([...(shell?.component_ids||[]),...s.component_ids]);
         const review=s.id.includes('review-'),initial=s.id==='editor-blocking';

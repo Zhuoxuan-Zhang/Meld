@@ -30,7 +30,7 @@ export const WorkspaceBrief = z.object({
   project_name: Text.optional(), market_signals: z.unknown().optional(),
   target_users: Text, core_tasks: z.array(Text), max_features: z.number().int().min(1).max(20),
   max_navigation: z.number().int().min(1).max(8), offline_only: z.literal(true),
-  implementation: Text, excluded: z.array(Text), scope: Text,
+  implementation: Text, excluded: z.array(Text), scope: z.string().min(1).max(20000),
 }).strict();
 export const HumanDecisions = Decisions.extend({ chosen_by: z.enum(['claude_proxy', 'openai_proxy', 'codex_proxy', 'user']) });
 export const RevisionData = z.object({ design: UnifiedDesign, brief: WorkspaceBrief, decisions: HumanDecisions });

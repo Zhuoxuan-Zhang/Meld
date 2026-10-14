@@ -24,6 +24,44 @@ export type PipelineJob = { id: string; design_id: string; input: DesignInputVal
 export type PipelineRunner = (request: { run: string; brief: string; market: string; config: string; apks: string[]; pauseForDecisions?: boolean }) => Promise<number | null>;
 export type PipelineOptions = { directory: string; apkDir?: string; toolRoot?: string; config?: string; runner?: PipelineRunner; pauseForDecisions?: boolean };
 
+export function scopedCoreTasks(input: DesignInputValue) {
+  const ids = new Set([...input.requested_features, ...input.preferences.flatMap(preference => preference.feature_ids)]);
+  const described = new Map(input.feature_requests.map(feature => [feature.id, feature]));
+  const features = [...ids].map(id => Object.hasOwn(featureById, id) ? featureById[id] : described.get(id)).filter(feature => feature !== undefined);
+  const text = features.length ? features.map(feature => `${feature.name} ${feature.description}`).join(" ") : `${input.brief.purpose} ${input.brief.goal}`;
+  const tasks = new Set<string>();
+  if (/\b(notes?|notepad|notebook|journal|checklists?|to-do)\b/i.test(text)) ["create", "edit", "save", "find", "reopen"].forEach(task => tasks.add(task));
+  if (/\b(timer|pomodoro|countdown)\b/i.test(text)) ["start", "pause", "resume", "reset", "complete session"].forEach(task => tasks.add(task));
+  if (/\b(habits?|routines?|streaks?)\b/i.test(text)) ["create habit", "check in", "undo check-in", "review history"].forEach(task => tasks.add(task));
+  if (/\b(insights?|progress|history)\b/i.test(text)) tasks.add("review history");
+  if (tasks.size) return [...tasks];
+  if (features.length) return features.map(feature => feature.name);
+  return [input.brief.goal || input.brief.purpose || "Complete the main task described in the app brief"];
+}
+
+export async function renderSelectionScope(input: DesignInputValue, apps: MarketApp[], templateFile = path.join(pipelineRoot, "../frontend/prompts/design-selection/prompt.md")) {
+  const template = await fs.readFile(templateFile, "utf8");
+  if (template.split("{{selection_json}}").length !== 2) throw new WorkbenchError("invalid_prompt", "The design selection template must contain exactly one {{selection_json}} placeholder.");
+  const described = new Map(input.feature_requests.map(feature => [feature.id, feature]));
+  const ids = [...new Set([...input.requested_features, ...input.preferences.flatMap(preference => preference.feature_ids)])];
+  const selectedApps = new Set(input.preferences.map(preference => preference.app_id));
+  const selection = {
+    classification: "user_preferences",
+    app: input.brief,
+    selected_reference_apps: apps.filter(app => selectedApps.has(app.appId)).map(app => ({ package_id: app.appId, title: app.title })),
+    analysis_reference_apps: apps.map(app => ({ package_id: app.appId, title: app.title })),
+    selected_features: ids.map(id => {
+      const feature = Object.hasOwn(featureById, id) ? featureById[id] : described.get(id);
+      if (!feature) throw new WorkbenchError("invalid_feature", "Refresh your feature choices before resuming.");
+      return { id, name: feature.name, description: feature.description,
+        reference_package_ids: input.preferences.filter(preference => preference.feature_ids.includes(id)).map(preference => preference.app_id) };
+    }),
+  };
+  const scope = template.replace("{{selection_json}}", () => JSON.stringify(selection, null, 2));
+  if (scope.length > 20000) throw new WorkbenchError("invalid_prompt", "The rendered design selection brief must fit within 20,000 characters.");
+  return scope;
+}
+
 export function processPipelineRunner(toolRoot?: string): PipelineRunner {
   return async input => {
     const output = path.join(path.dirname(input.run), "execution.log");
@@ -144,21 +182,16 @@ export class PipelineJobs {
         job.status = "waiting_inputs"; job.phase = "Your market results are saved. Reference files are needed before analysis can continue."; job.missing_apps = missing; return;
       }
       const directory = path.join(this.options.directory, job.id), run = path.join(directory, "analysis");
-      const described = new Map((job.input.feature_requests || []).map(feature => [feature.id, feature]));
-      const preferences = [...job.input.requested_features, ...job.input.preferences.flatMap(p => p.feature_ids)].map(id => {
-        if (Object.hasOwn(featureById, id)) return featureById[id].name;
-        const feature = described.get(id);
-        if (!feature) throw new WorkbenchError("invalid_feature", "Refresh your feature choices before resuming.");
-        return `${feature.name}: ${feature.description}`;
-      });
-      const brief = { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: ["create", "edit", "save", "find", "reopen"], max_features: 5, max_navigation: 3, offline_only: true,
+      const briefFile = path.join(directory, "brief.json");
+      // Retry with the saved prompt even if the editable template has changed.
+      const brief = await exists(briefFile) ? await json(briefFile) : { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: scopedCoreTasks(job.input), max_features: 5, max_navigation: 3, offline_only: true,
         implementation: "Android Kotlin / Jetpack Compose", excluded: ["accounts", "cloud sync"],
-        scope: `${job.input.brief.purpose || job.input.brief.goal}. User-selected feature preferences: ${[...new Set(preferences)].join(", ")}. Visual preference: ${job.input.brief.style}. Preferences are product requests, not verified source-app behaviors.`,
+        scope: await renderSelectionScope(job.input, apps),
         market_signals: { scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
       const market = await json(path.join(directory, "market.json"));
       for (const app of market.apps) if (app.apk_sha256 && app.apk_sha256 !== locks.find(l => l.appId === app.appId)!.apk_sha256) throw new WorkbenchError("reference_changed", "Reference files changed; create a new design request.", 409);
       market.apps = market.apps.map((app: MarketApp) => ({ ...app, apk_sha256: locks.find(l => l.appId === app.appId)!.apk_sha256 })); await write(path.join(directory, "market.json"), market);
-      await write(path.join(directory, "brief.json"), brief); const config = this.options.config || path.join(pipelineRoot, "config/runtime.pipeline.json");
+      await write(briefFile, brief); const config = this.options.config || path.join(pipelineRoot, "config/runtime.pipeline.json");
       job.phase = "Analyzing reference apps and combining the design…"; await write(this.file(job.id), job);
       // An interrupted run resumes in-place with the engine's fingerprint checks.
       const runner = this.options.runner || processPipelineRunner(this.options.toolRoot);
