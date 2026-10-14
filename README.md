@@ -1,10 +1,26 @@
-# New App Agent: App Market Scanner
+# New App Agent
 
-The `kevin` branch also includes the Meld frontend and its [interactive design-document workflow](docs/design-doc-interaction.md): market Top 5 → verified APK analysis → detailed design → readable explanation → user-confirmed edits. The confirmed developer JSON is exported for app generation. Run `scripts/dev.sh` with Node 24 to open the local studio. The standalone market collector below keeps its original interfaces and scoring behavior.
+Meld combines market research, APK analysis and an [interactive design-document workflow](docs/design-doc-interaction.md): market Top 5 → static APK analysis → detailed design → readable explanation → user-confirmed edits. The confirmed developer JSON is exported for app generation. Fresh analysis requires reference APKs; an Android coding/build worker is a separate downstream integration.
+
+## Workspace and development
+
+Develop directly from this repository root; there is no nested `repo/` checkout.
+
+| Folder | Responsibility |
+| --- | --- |
+| `frontend/` | React studio, local HTTP APIs, market handoff and design jobs |
+| `pipeline/` | TypeScript APK analysis, model calls, design validation and revision storage |
+| `app_market/` | Independent Python market collector |
+| `docs/` | Design interaction, setup and API contracts |
+| `md/` | Original APK-analysis implementation specification |
+
+With Node 24, run `scripts/dev.sh --no-open`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner and compiles the backend. See [frontend setup](frontend/README.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
+
+## Standalone market scanner
 
 A standalone market-research component: **input an app category, receive a ranked list of up to five Android apps** with public Google Play evidence.
 
-Extracted from the market-collection stage of [`copy_agent`](https://github.com/Zhuoxuan-Zhang/copy_agent), this project preserves its transparent 1–15 scoring formula and removes the downstream design, APK analysis, emulator, app-building, and presentation stages. It does not require an LLM, API key, Google account, or Android SDK.
+Extracted from the market-collection stage of [`copy_agent`](https://github.com/Zhuoxuan-Zhang/copy_agent), this component preserves its transparent 1–15 scoring formula and can run independently of the downstream design and APK stages. The collector does not require an LLM, API key, Google account, or Android SDK.
 
 ## Quick start
 

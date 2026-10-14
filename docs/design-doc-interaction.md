@@ -1,6 +1,6 @@
 # Interactive design documents
 
-The design workflow is integrated into Kevin’s existing **Review** page. The detailed developer design remains authoritative. A model generates a shorter English explanation for ordinary users; changes become proposals that require confirmation before updating the detailed design.
+The design workflow is integrated into Kevin’s existing **Review** page. The detailed developer design remains authoritative. A model generates a shorter English explanation for ordinary users; changes become proposals that require confirmation before updating the detailed design. This checkout now lives directly at the workspace root, without a nested `repo/` folder.
 
 ## Run
 
@@ -66,6 +66,8 @@ All routes use the same local server under `/api/design`. They are available in 
 | `GET /designs/{id}/build-input` | Export the authoritative approved design for app generation |
 | `GET /designs/{id}/revisions/{rev}/artifacts/{name}` | Read a hash-verified artifact |
 
+Pipeline input also accepts `feature_requests`: bounded `{id, name, description}` objects for selected store-listing features. Their IDs may include the package name and need not match the older sample catalog. They are user preferences, kept separately from server-owned market snapshots and APK findings. App-specific selections must refer to that app's feature ID prefix. Existing sample-ID clients remain compatible.
+
 Example change request:
 
 ```json
@@ -102,4 +104,4 @@ npm --prefix frontend test
 
 Unit/API/browser tests use explicit synthetic model fixtures. The separate `frontend/tests/design-live.mjs` is opt-in: it uses the actual React UI, backend and Codex, and script-confirms a green-accent change in the `notes` workspace. It publishes a design version and consumes model usage; run intentionally. Screenshots and its report are written to `frontend/qa-screenshots/design/`. Live Google Play tests remain opt-in through `MELD_LIVE_MARKET=1`.
 
-Verified in this checkout: 42 pipeline tests, 11 new API/browser tests, 55 existing frontend tests, 25 market-scanner tests, and a production build. The 11 live Google Play cases were skipped. Seven real Codex calls generated, reviewed, changed and re-explained the Notes design; a scripted browser confirmation published revision 2 with a green accent. Both saved revisions pass validation and the original source hash is unchanged. The Top 5 runner contract was tested with a synthetic downstream; fresh five-APK analysis and a generic Android build were not run.
+After merging the latest frontend and moving to the workspace root: 42 pipeline tests, 27 market-scanner tests, 80 frontend/API cases (including 12 interactive-design cases), and the production build pass. One browser-context teardown timed out in the full run and passed on an isolated rerun; 12 live Google Play cases remain skipped. The original live Notes check used seven real Codex calls to generate, review, change and re-explain the design; scripted confirmation published revision 2 with a green accent. Both saved revisions still validate after relocation and the original source hash is unchanged. The Top 5 runner contract uses a synthetic downstream fixture; fresh five-APK analysis and a generic Android build were not run.

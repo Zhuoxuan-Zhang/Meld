@@ -75,10 +75,10 @@ test("store-listing feature choices survive the handoff as user preferences", as
     const saved = await json(path.join(api.root, "pipeline", job.id, "market.json"));
     expect(saved.feature_requests).toEqual([feature]);
     expect(saved.scans[0].apps[0].listedFeatures).toBeUndefined();
-    const wrongApp = await request.post(api.address + "/api/design/pipeline", { data: { ...body, request_key: randomUUID(), preferences: [{ app_id: "com.example.tasks", feature_ids: [feature.id] }] } });
-    expect(wrongApp.status()).toBe(422);
+    const wrongApp = await request.post(api.address + "/api/design/pipeline", { data: { ...body, request_key: randomUUID(), preferences: [{ app_id: "com.example.calendar", feature_ids: [feature.id] }] } });
+    expect(wrongApp.status()).toBe(400);
     const missing = await request.post(api.address + "/api/design/pipeline", { data: { ...body, request_key: randomUUID(), feature_requests: [] } });
-    expect(missing.status()).toBe(422);
+    expect(missing.status()).toBe(400);
   } finally { await api.close(); }
 });
 test("APK-ready handoff feeds every ranked package into the runner and imports its design (synthetic downstream)", async ({ request }) => {

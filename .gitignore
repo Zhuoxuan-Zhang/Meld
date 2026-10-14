@@ -11,3 +11,10 @@ dist/
 outputs/
 *.log
 .DS_Store
+
+# Existing local experiments, outputs and workspace instructions.
+/.workspace-archive/
+/AGENTS.md
+/apk-design-mvp/
+/offline-notes-android/
+/demo-video/
