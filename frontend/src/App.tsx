@@ -10,12 +10,15 @@ import {
   mergedFeatures,
   selectedApps,
   storageKey,
+  withListedFeatures,
   withMarketResult,
 } from "./state";
-import { formatInstalls, inDomain, monetization } from "./market";
+import { formatInstalls, inDomain, monetization, sizedImage } from "./market";
 import type { MarketApp, MarketResult } from "./market";
 import { useMarket } from "./useMarket";
 import type { MarketConnection, ScanState } from "./useMarket";
+import { useListedFeatures } from "./useFeatures";
+import type { FeatureConnection, FeatureState } from "./useFeatures";
 import type { Draft, Style } from "./state";
 import { Icon } from "./icons";
 import SuggestionPanel, { PlanSummary } from "./SuggestionPanel";
@@ -47,6 +50,8 @@ function go(path: string) {
 function appStyle(a: ReferenceApp): CSSProperties {
   return { "--app-color": a.color, "--app-bg": a.bg } as CSSProperties;
 }
+// A live app shows its Google Play icon, and its first letter when there is
+// no icon or the image does not load.
 function AppIcon({
   app,
   small = false,
@@ -54,17 +59,54 @@ function AppIcon({
   app: ReferenceApp;
   small?: boolean;
 }) {
+  const [failed, setFailed] = useState("");
+  const image = app.market?.iconUrl;
+  const showImage = !!image && failed !== image;
   return (
     <span
-      className={`app-icon ${small ? "small" : ""} ${app.market ? "market-initial" : ""}`}
+      className={`app-icon ${small ? "small" : ""} ${app.market ? "market-initial" : ""} ${showImage ? "has-image" : ""}`}
       style={appStyle(app)}
     >
-      {app.market ? (
+      {showImage ? (
+        <img
+          src={sizedImage(image, "s128")}
+          alt=""
+          referrerPolicy="no-referrer"
+          decoding="async"
+          onError={() => setFailed(image)}
+        />
+      ) : app.market ? (
         <span aria-hidden="true">{[...app.name.trim()][0]?.toUpperCase()}</span>
       ) : (
         <Icon name={app.icon} size={small ? 19 : 29} />
       )}
     </span>
+  );
+}
+// The listing's first screenshots, loaded from Google's image server. Images
+// that do not load are left out.
+function Screenshots({ app }: { app: MarketApp }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const shots = (app.screenshots || []).filter((u) => !failed.includes(u));
+  if (!shots.length) return null;
+  return (
+    <section
+      className="app-screenshots"
+      aria-label={`${app.title} screenshots from Google Play`}
+      tabIndex={0}
+    >
+      {shots.map((u, i) => (
+        <img
+          key={u}
+          src={sizedImage(u, "h560")}
+          alt={`${app.title} screenshot ${i + 1}`}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed((f) => [...f, u])}
+        />
+      ))}
+    </section>
   );
 }
 function Brand() {
@@ -208,6 +250,9 @@ export default function App() {
   );
   const market = useMarket(draft.domains, draft.market, (domain, result) =>
     setDraft((d) => withMarketResult(d, domain, result)),
+  );
+  const listing = useListedFeatures(draft.domains, draft.market, (features) =>
+    setDraft((d) => withListedFeatures(d, features)),
   );
   const count = Object.values(draft.selected).reduce((s, a) => s + a.length, 0);
   const routeAppId = route.startsWith("/apps/")
@@ -626,6 +671,7 @@ export default function App() {
               scans={market.scans}
               scan={market.scan}
               checkMarket={market.check}
+              listing={listing}
               selected={selected}
               count={count}
               mergedCount={merged.length}
@@ -642,6 +688,7 @@ export default function App() {
             <FeaturePage
               app={currentApp}
               result={draft.market?.[currentApp.domain]}
+              listing={listing}
               draft={draft}
               toggle={toggleFeature}
               update={update}
@@ -1121,6 +1168,7 @@ function AppsPage({
   scans,
   scan,
   checkMarket,
+  listing,
   selected,
   count,
   mergedCount,
@@ -1138,6 +1186,7 @@ function AppsPage({
   scans: Record<string, ScanState>;
   scan: (domain: string, refresh?: boolean) => void;
   checkMarket: () => void;
+  listing: Listing;
   selected: ReferenceApp[];
   count: number;
   mergedCount: number;
@@ -1159,11 +1208,12 @@ function AppsPage({
   const filtered = shown.filter(
     (a) =>
       (filter === "All interests" || inDomain(a, filter)) &&
-      `${a.name} ${a.tagline} ${a.market?.developer || ""} ${a.features.map((f) => f.name).join(" ")}`
+      `${a.name} ${a.tagline} ${a.market?.developer || ""} ${a.features.map((f) => f.name).join(" ")} ${a.market?.listedFeatures?.items.map((f) => `${f.name} ${f.detail}`).join(" ") || ""}`
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
   const live = shown.some((a) => a.market);
+  const summarized = shown.some((a) => a.market?.listedFeatures?.items.length);
   const unknown = draft.domains.filter(
     (d) =>
       !domains.some((x) => x.name === d) &&
@@ -1204,6 +1254,7 @@ function AppsPage({
             scans={scans}
             scan={scan}
             check={checkMarket}
+            listing={listing}
           />
           <div className="catalog-tools">
             <div
@@ -1245,9 +1296,11 @@ function AppsPage({
             <span>{filtered.length} reference apps</span>
             <span>
               <Icon name={live ? "TrendingUp" : "Info"} size={13} />
-              {live
-                ? "Live Google Play signals · sample features"
-                : "Curated demo collection"}
+              {summarized
+                ? "Live Google Play signals · features from store listings"
+                : live
+                  ? "Live Google Play signals · sample features"
+                  : "Curated demo collection"}
             </span>
           </div>
           {pending.length > 0 && !query && (
@@ -1263,9 +1316,10 @@ function AppsPage({
             <div className="custom-domain-note">
               <Icon name="Info" size={17} />
               <p>
-                No sample collection yet for{" "}
-                <strong>{unknown.join(", ")}</strong>. Try one of the six
-                example domains to explore the demo.
+                No apps yet for <strong>{unknown.join(", ")}</strong>.{" "}
+                {connection?.available
+                  ? "Check the market signals above, or try other words."
+                  : "Market signals are off, so only the six suggested domains have sample apps."}
                 <button onClick={() => go("/domains")}>
                   Edit interests <Icon name="ArrowRight" size={13} />
                 </button>
@@ -1323,6 +1377,7 @@ function AppsPage({
           <div className="app-grid">
             {filtered.map((a) => {
               const n = draft.selected[a.id]?.length || 0;
+              const tags = a.features.map((f) => f.name);
               return (
                 <button
                   className={`reference-card ${n ? "has-selection" : ""}`}
@@ -1351,12 +1406,10 @@ function AppsPage({
                     <p className={a.market ? "clamped" : ""}>{a.tagline}</p>
                     {a.market && <MarketMetrics app={a.market} />}
                     <div className="card-feature-tags">
-                      {a.features.slice(0, 2).map((f) => (
-                        <span key={f.id}>{f.name}</span>
+                      {tags.slice(0, 2).map((t, i) => (
+                        <span key={i}>{t}</span>
                       ))}
-                      {a.features.length > 2 && (
-                        <span>+{a.features.length - 2}</span>
-                      )}
+                      {tags.length > 2 && <span>+{tags.length - 2}</span>}
                     </div>
                     <div className="reference-footer">
                       <span>{a.domain}</span>
@@ -1368,7 +1421,9 @@ function AppsPage({
                           </>
                         ) : (
                           <>
-                            {a.features.length} features
+                            {a.features.length
+                              ? `${a.features.length} feature${a.features.length === 1 ? "" : "s"}`
+                              : "No features yet"}
                             <Icon name="ChevronRight" size={14} />
                           </>
                         )}
@@ -1393,7 +1448,9 @@ function AppsPage({
                   ? "Try a different app name or feature, such as “notes”."
                   : pending.length
                     ? "Market signals are on their way. Hot apps appear here when the scan finishes."
-                    : "Your interest is saved. Add an example domain to explore our fixed demo catalog."
+                    : connection?.available
+                      ? "No apps were found for these domains yet. Try other words, or add a suggested domain."
+                      : "Your interest is saved. Add a suggested domain to explore the sample catalog."
               }
             >
               {query ? (
@@ -1548,6 +1605,7 @@ function SelectionPanel({
 function FeaturePage({
   app,
   result,
+  listing,
   draft,
   toggle,
   update,
@@ -1555,6 +1613,7 @@ function FeaturePage({
 }: {
   app: ReferenceApp;
   result?: MarketResult;
+  listing: Listing;
   draft: Draft;
   toggle: (a: string, f: string) => void;
   update: (p: Partial<Draft>) => void;
@@ -1562,6 +1621,7 @@ function FeaturePage({
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const ids = draft.selected[app.id] || [];
+  const listed = app.features.some((f) => f.listed);
   useEffect(() => setExpanded(null), [app.id]);
   return (
     <>
@@ -1591,48 +1651,56 @@ function FeaturePage({
           <span>{app.label}</span>
         </div>
       </section>
+      {app.market && <Screenshots app={app.market} />}
       <div className="detail-layout">
         <section>
           <div className="features-heading">
             <div>
               <h2>Choose features</h2>
               <p>
-                {app.market
-                  ? "Sample features for this app. Pick the parts that belong in your new app."
-                  : "Pick the parts that belong in your new app."}
+                {listed
+                  ? `From ${app.name}’s Google Play listing, summarized by Claude Code. Pick the parts that belong in your new app.`
+                  : app.market && app.features.length
+                    ? "Meld sample features that match words in this listing. Pick the parts that belong in your new app."
+                    : app.market
+                      ? "Features appear here once Claude Code summarizes the store listing."
+                      : "Pick the parts that belong in your new app."}
               </p>
             </div>
-            <div
-              className="bulk-actions"
-              role="group"
-              aria-label="All app features"
-            >
-              <button
-                className="text-button"
-                disabled={ids.length === app.features.length}
-                onClick={() =>
-                  update({
-                    selected: {
-                      ...draft.selected,
-                      [app.id]: app.features.map((f) => f.id),
-                    },
-                  })
-                }
+            {app.features.length > 0 && (
+              <div
+                className="bulk-actions"
+                role="group"
+                aria-label="All app features"
               >
-                Select all
-              </button>
-              <span aria-hidden="true">/</span>
-              <button
-                className="text-button"
-                disabled={!ids.length}
-                onClick={() =>
-                  update({ selected: { ...draft.selected, [app.id]: [] } })
-                }
-              >
-                Deselect all
-              </button>
-            </div>
+                <button
+                  className="text-button"
+                  disabled={ids.length === app.features.length}
+                  onClick={() =>
+                    update({
+                      selected: {
+                        ...draft.selected,
+                        [app.id]: app.features.map((f) => f.id),
+                      },
+                    })
+                  }
+                >
+                  Select all
+                </button>
+                <span aria-hidden="true">/</span>
+                <button
+                  className="text-button"
+                  disabled={!ids.length}
+                  onClick={() =>
+                    update({ selected: { ...draft.selected, [app.id]: [] } })
+                  }
+                >
+                  Deselect all
+                </button>
+              </div>
+            )}
           </div>
+          {app.market && <ListingStatus app={app.market} listing={listing} />}
           <div className="feature-list">
             {app.features.map((f, i) => {
               const active = ids.includes(f.id);
@@ -1665,15 +1733,17 @@ function FeaturePage({
                       {active && <Icon name="Check" size={14} />}
                     </span>
                   </label>
-                  <button
-                    className="feature-expand"
-                    aria-expanded={expanded === f.id}
-                    onClick={() => setExpanded(expanded === f.id ? null : f.id)}
-                  >
-                    See the user journey
-                    <Icon name="ChevronDown" size={14} />
-                  </button>
-                  {expanded === f.id && (
+                  {f.flow && (
+                    <button
+                      className="feature-expand"
+                      aria-expanded={expanded === f.id}
+                      onClick={() => setExpanded(expanded === f.id ? null : f.id)}
+                    >
+                      See the user journey
+                      <Icon name="ChevronDown" size={14} />
+                    </button>
+                  )}
+                  {expanded === f.id && f.flow && (
                     <div className="feature-journey">
                       <Icon name="ArrowRight" size={16} />
                       <p>{f.flow}</p>
@@ -1683,6 +1753,14 @@ function FeaturePage({
               );
             })}
           </div>
+          {listed && app.market?.listedFeatures && (
+            <p className="listed-source">
+              {app.market.listedFeatures.model} · prompt{" "}
+              {app.market.listedFeatures.template} ·{" "}
+              {app.market.listedFeatures.generatedAt.slice(0, 10)}. What the
+              developer says, not verified analysis.
+            </p>
+          )}
           <div className="feature-bottom">
             <span>
               <Icon name="CircleCheck" size={16} />
@@ -1720,9 +1798,11 @@ function FeaturePage({
             </p>
             <div className="note-divider" />
             <p className="small">
-              {app.market
-                ? `These are sample features for ${app.name}, matched from its category and store description. Live REA analysis is not connected yet.`
-                : `These are sample feature briefs inspired by ${app.name}. Live app analysis is not connected in this demo.`}
+              {listed
+                ? `These features are what ${app.name}’s developer describes in its store listing, not verified analysis. The browser demo describes them but cannot build them. Live REA analysis is not connected yet.`
+                : app.market
+                  ? `These are sample features for ${app.name}, matched to words in its store listing. Live REA analysis is not connected yet.`
+                  : `These are sample feature briefs inspired by ${app.name}. Live app analysis is not connected in this demo.`}
             </p>
           </div>
           <div className="saved-hint">
@@ -2151,6 +2231,7 @@ function MarketSignals({
   scans,
   scan,
   check,
+  listing,
 }: {
   draft: Draft;
   shown: ReferenceApp[];
@@ -2158,6 +2239,7 @@ function MarketSignals({
   scans: Record<string, ScanState>;
   scan: (domain: string, refresh?: boolean) => void;
   check: () => void;
+  listing: Listing;
 }) {
   // Apps this domain shares with a domain listed earlier.
   const sharedWith = (domain: string, result: MarketResult) => {
@@ -2203,7 +2285,17 @@ function MarketSignals({
           <p>
             Top apps per domain from a live Google Play scan, ranked by an
             opportunity score from 1 to 15.
+            {listing.connection?.available &&
+              " Claude Code summarizes the features in each store listing."}
           </p>
+          {listing.connection && !listing.connection.available && (
+            <p className="feature-off">
+              Feature summaries are off. {listing.connection.reason}{" "}
+              <button className="text-button" onClick={listing.check}>
+                Check again
+              </button>
+            </p>
+          )}
         </div>
       </div>
       <ul className="market-rows" aria-live="polite">
@@ -2211,6 +2303,7 @@ function MarketSignals({
           const state = scans[domain];
           const result = draft.market?.[domain];
           const busy = state?.phase === "scanning";
+          const summary = listing.states[domain];
           return (
             <li key={domain} data-domain={domain}>
               <span className="market-domain">{domain}</span>
@@ -2250,11 +2343,37 @@ function MarketSignals({
                       result.apps.length > 0 &&
                       " · fewer than five matches"}
                     <small>{timeAgo(result.generatedAt, now)}</small>
+                    {summary && (
+                      <span
+                        className={`feature-status ${summary.phase === "error" ? "failed" : ""}`}
+                      >
+                        <Icon
+                          name={summary.phase === "error" ? "CircleAlert" : "LoaderCircle"}
+                          size={13}
+                          className={summary.phase === "error" ? undefined : "spin"}
+                        />
+                        {summary.phase === "error"
+                          ? summary.message
+                          : summary.queued
+                            ? "Features: waiting for Claude Code…"
+                            : "Summarizing features with Claude Code…"}
+                      </span>
+                    )}
                   </>
                 ) : (
                   "Waiting to scan…"
                 )}
               </span>
+              {summary?.phase === "error" && !busy && (
+                <button
+                  className="text-button"
+                  onClick={() => listing.retry(domain)}
+                  aria-label={`Retry features for ${domain}`}
+                >
+                  <Icon name="RefreshCw" size={13} />
+                  Retry features
+                </button>
+              )}
               <button
                 className="text-button"
                 onClick={() => scan(domain, true)}
@@ -2269,6 +2388,51 @@ function MarketSignals({
         })}
       </ul>
     </section>
+  );
+}
+type Listing = {
+  connection: FeatureConnection | null;
+  states: Record<string, FeatureState>;
+  retry: (domain: string) => void;
+  check: () => void;
+};
+// Why an app's store-listing features are not shown yet: Claude Code is
+// summarizing, failed, is off, or the listing names no features.
+function ListingStatus({ app, listing }: { app: MarketApp; listing: Listing }) {
+  const listed = app.listedFeatures;
+  const [domain, state] =
+    Object.entries(listing.states).find(([, s]) => s.appIds.includes(app.appId)) || [];
+  let status: ReactNode = null;
+  if (listed?.items.length) return null;
+  if (listed) status = "The store listing does not describe specific features.";
+  else if (state?.phase === "running")
+    status = (
+      <>
+        <Icon name="LoaderCircle" size={15} className="spin" />
+        Summarizing the store listing with Claude Code…
+      </>
+    );
+  else if (state?.phase === "error")
+    status = (
+      <>
+        <Icon name="CircleAlert" size={15} />
+        {state.message}
+        <button className="text-button" onClick={() => listing.retry(domain!)}>
+          Retry
+        </button>
+      </>
+    );
+  else if (listing.connection && !listing.connection.available)
+    status = `Feature summaries are off. ${listing.connection.reason || ""}`;
+  else if (app.retained)
+    status = "This app is from an earlier scan; its listing was not summarized.";
+  else if (app.description === undefined)
+    status = "This scan predates store listings. Rescan the domain to see them.";
+  else status = "Waiting for Claude Code…";
+  return (
+    <p className={`listed-status ${state?.phase === "error" ? "failed" : ""}`} role="status">
+      {status}
+    </p>
   );
 }
 function MarketMetrics({ app }: { app: MarketApp }) {

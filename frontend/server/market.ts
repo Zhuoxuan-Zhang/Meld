@@ -208,7 +208,8 @@ export function marketApi(options: MarketOptions): Plugin {
       ...plan.queries.map((q) => `--query=${q}`),
       `--max-candidates=${maxCandidates}`,
     ];
-    const key = JSON.stringify(["v1", domain, args]);
+    // v3: reports carry store descriptions and image links.
+    const key = JSON.stringify(["v3", domain, args]);
     if (!refresh) {
       const hit = await cached(key);
       if (hit) return { result: hit, cached: true };

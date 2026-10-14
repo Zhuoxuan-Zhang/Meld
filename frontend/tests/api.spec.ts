@@ -187,7 +187,7 @@ test("local API rejects invalid input and cross-origin requests before calling t
     expect(
       (
         await request.post(api.address + "/api/ai/suggest", {
-          data: { ...body, goal: "x".repeat(17000) },
+          data: { ...body, goal: "x".repeat(97000) },
         })
       ).status(),
     ).toBe(413);
@@ -309,6 +309,81 @@ test("a second generation is blocked while one is running and cancellation relea
         ).status(),
       )
       .toBe(400);
+  } finally {
+    await api.close();
+  }
+});
+
+test("store-listing features in a shown catalog reach the model with their text and can be planned", async ({
+  request,
+}) => {
+  const listed = (appId: string, slug: string, name: string) => ({
+    id: `${appId}:${slug}`,
+    name,
+    description: `${name} as the store listing describes it.`,
+  });
+  const catalog = [
+    {
+      id: "com.example.runner",
+      name: "Train Runner",
+      domain: "Games",
+      features: [
+        listed("com.example.runner", "endless-runs", "Endless runs"),
+        listed("com.example.runner", "daily-challenges", "Daily challenges"),
+      ],
+    },
+    {
+      id: "com.example.puzzle",
+      name: "Puzzle Rooms",
+      domain: "Games",
+      features: [listed("com.example.puzzle", "level-map", "Level map"), "goals"],
+    },
+  ];
+  const plan = {
+    name: "Runner Rooms",
+    summary: "Endless runs that unlock puzzle rooms.",
+    audience: "Casual players",
+    journey: ["Run.", "Unlock a room.", "Track the goal."],
+    features: [
+      { appId: "com.example.runner", featureId: "com.example.runner:endless-runs", reason: "The core loop." },
+      { appId: "com.example.puzzle", featureId: "com.example.puzzle:level-map", reason: "Shows progress." },
+      { appId: "com.example.puzzle", featureId: "goals", reason: "Gives each run a target." },
+    ],
+  };
+  let sent: RequestInit | undefined;
+  const api = await serve(async (_url, init) => {
+    sent = init;
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }),
+    );
+  });
+  try {
+    const response = await request.post(api.address + "/api/ai/suggest", {
+      data: { domains: ["Games"], goal: "", catalog },
+    });
+    expect(response.status()).toBe(200);
+    expect((await response.json()).plan.features.map((f: { featureId: string }) => f.featureId)).toEqual([
+      "com.example.runner:endless-runs",
+      "com.example.puzzle:level-map",
+      "goals",
+    ]);
+    const prompted = JSON.parse(JSON.parse(sent!.body as string).messages[1].content).catalog;
+    expect(prompted[0].features[0]).toEqual(catalog[0].features[0]);
+    // Sample features still get the server's own text.
+    expect(prompted[1].features[1].name).toBe("Personal goals");
+
+    // Listing features must belong to their app and carry text.
+    for (const features of [
+      [listed("com.example.puzzle", "level-map", "Level map")],
+      [{ id: "com.example.runner:endless-runs", name: "Endless runs" }],
+      [{ ...listed("com.example.runner", "x", "X"), id: "com.example.runner:Bad Slug" }],
+      ["not-a-feature"],
+    ]) {
+      const bad = await request.post(api.address + "/api/ai/suggest", {
+        data: { domains: ["Games"], goal: "", catalog: [{ ...catalog[0], features }, catalog[1]] },
+      });
+      expect(bad.status()).toBe(400);
+    }
   } finally {
     await api.close();
   }

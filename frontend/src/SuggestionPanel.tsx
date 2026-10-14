@@ -117,15 +117,22 @@ export default function SuggestionPanel({
           domains: draft.domains,
           goal: draft.goal,
           // Live market apps are not in the server's sample catalog, so the
-          // shown catalog travels with the request.
+          // shown catalog travels with the request. Store-listing features
+          // carry their text; sample features are sent by id.
           ...(shown.some((a) => a.market)
             ? {
-                catalog: shown.map((a) => ({
-                  id: a.id,
-                  name: a.name,
-                  domain: a.domain,
-                  features: a.features.map((f) => f.id),
-                })),
+                catalog: shown
+                  .filter((a) => a.features.length)
+                  .map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                    domain: a.domain,
+                    features: a.features.map((f) =>
+                      f.listed
+                        ? { id: f.id, name: f.name, description: f.description }
+                        : f.id,
+                    ),
+                  })),
               }
             : {}),
         }),
@@ -171,7 +178,10 @@ export default function SuggestionPanel({
     if (suggestion) {
       update({ suggestion });
       setError("");
-    }
+    } else
+      setError(
+        "An example needs three different features from at least two apps. Wait for Claude Code to summarize the store listings, or choose features from the apps below.",
+      );
   };
   return (
     <section
@@ -258,7 +268,8 @@ export default function SuggestionPanel({
       </div>
       {!hasCatalog && (
         <p className="info-note">
-          Add one of the example domains to get a feature suggestion.
+          Suggestions need apps to combine. Wait for market signals to find
+          apps for your domains, or add a suggested domain.
         </p>
       )}
       {status && !status.available && (

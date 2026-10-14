@@ -298,7 +298,8 @@ test("custom domains get live apps, example plans and AI requests use the shown 
     "com.example.focus",
   ]);
   expect(payload.catalog?.every((a) => a.domain === "Gardening")).toBe(true);
-  expect(payload.catalog?.[0].features.length).toBeGreaterThanOrEqual(3);
+  // Only sample features whose words appear in the listing; no generic fill.
+  expect(payload.catalog?.[0].features).toEqual(["tasks", "timer"]);
 });
 
 test("removing a domain stops its scan and forgets its results", async ({
@@ -417,4 +418,391 @@ test("the browser sends at most two scans at once and shows the rest as waiting"
   await expect(rows.filter({ hasText: "Top 5 of 28 ranked" })).toHaveCount(4);
   expect(peak).toBe(2);
   await expect(page.locator(".reference-card")).toHaveCount(20);
+});
+
+type FeatureRequest = {
+  domain: string;
+  apps: { appId: string; title: string; summary: string; description: string }[];
+};
+const template = "app-features@0123456789ab";
+const listed = (title: string) => [
+  { name: `${title} widgets`, detail: `Widgets that show ${title} on the home screen.` },
+  { name: "Sync across devices", detail: "Keeps entries the same on every device." },
+  { name: "Reminders", detail: "Sends reminders at chosen times." },
+];
+// Routes the local Claude Code API; `reply` answers each feature request.
+async function liveClaude(
+  page: Page,
+  reply: (req: FeatureRequest, call: number) => Reply | Promise<Reply> = (req) => ({
+    status: 200,
+    json: {
+      features: Object.fromEntries(
+        req.apps.map((a) => [
+          a.appId,
+          {
+            items: listed(a.title),
+            model: "claude-haiku-5-5",
+            template,
+            generatedAt: new Date().toISOString(),
+          },
+        ]),
+      ),
+      template,
+      model: "claude-haiku-5-5",
+      cached: false,
+    },
+  }),
+  available = true,
+) {
+  const requests: FeatureRequest[] = [];
+  await page.route("**/api/claude/status", (r) =>
+    r.fulfill({
+      json: available
+        ? { available: true, model: "claude-haiku-5-5", template }
+        : {
+            available: false,
+            model: "claude-haiku-5-5",
+            reason: "Claude Code is not logged in.",
+          },
+    }),
+  );
+  await page.route("**/api/claude/features", async (r) => {
+    const req = r.request().postDataJSON() as FeatureRequest;
+    requests.push(req);
+    const { status, json } = await reply(req, requests.length);
+    await r.fulfill({ status, json }).catch(() => {});
+  });
+  return requests;
+}
+
+test("features summarized by Claude Code become the choices on cards, the app page and the design brief", async ({
+  page,
+}) => {
+  await liveMarket(page);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
+  const requests = await liveClaude(page, async (req) => {
+    await hold;
+    return {
+      status: 200,
+      json: {
+        features: Object.fromEntries(
+          req.apps.map((a) => [
+            a.appId,
+            {
+              items: listed(a.title),
+              model: "claude-haiku-5-5",
+              template,
+              generatedAt: "2026-10-13T10:00:00.000Z",
+            },
+          ]),
+        ),
+      },
+    };
+  });
+  await start(page);
+  await page.getByRole("button", { name: /^Productivity/ }).click();
+  await page.getByRole("button", { name: "Explore apps" }).click();
+  const row = page.locator('.market-rows li[data-domain="Productivity"]');
+  await expect(row).toContainText("Summarizing features with Claude Code…");
+  // Each scanned listing is sent once, with its full description.
+  expect(requests).toHaveLength(1);
+  expect(requests[0].domain).toBe("Productivity");
+  expect(requests[0].apps.map((a) => a.appId)).toEqual([
+    "com.example.calendar",
+    "com.example.notes",
+    "com.example.colornote",
+    "com.example.todo",
+    "com.example.focus",
+  ]);
+  expect(requests[0].apps[0].description).toContain("• Calendar Pro widgets");
+  await page.locator(".reference-card").first().click();
+  await expect(page.locator(".listed-status")).toContainText(
+    "Summarizing the store listing with Claude Code…",
+  );
+  // A sample feature chosen while Claude Code works is kept afterwards.
+  await page.getByRole("checkbox", { name: /Simple task lists/ }).check();
+  release();
+  const titles = page.locator(".feature-card .feature-title");
+  await expect(titles).toHaveCount(4);
+  await expect(titles).toContainText([
+    "Calendar Pro widgets",
+    "Sync across devices",
+    "Reminders",
+    "Simple task lists",
+  ]);
+  await expect(page.getByRole("checkbox", { name: /Simple task lists/ })).toBeChecked();
+  await expect(page.locator(".listed-status")).toHaveCount(0);
+  await expect(page.getByText(/From Calendar Pro’s Google Play listing/)).toBeVisible();
+  await expect(page.locator(".listed-source")).toContainText(
+    `claude-haiku-5-5 · prompt ${template} · 2026-10-13`,
+  );
+  // Listing features describe what the app does; there is no sample journey.
+  await expect(
+    page.locator(".feature-card", { hasText: "Reminders" }).getByRole("button", {
+      name: "See the user journey",
+    }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to app plan" }).click();
+  await expect(row).not.toContainText("Summarizing");
+  await expect(
+    page.locator(".reference-card").first().locator(".card-feature-tags"),
+  ).toHaveText(/Calendar Pro widgets\s*Sync across devices\s*\+2/);
+  await expect(
+    page.getByText("Live Google Play signals · features from store listings"),
+  ).toBeVisible();
+  // Listing features are searchable.
+  await page.getByLabel("Search apps and features").fill("color notes widgets");
+  await expect(page.locator(".reference-card h3")).toHaveText(["Color Notes"]);
+  await page.getByLabel("Search apps and features").fill("");
+
+  // Chosen listing features travel into the design brief, labeled with their source.
+  await page.locator(".reference-card").first().click();
+  await page.getByRole("checkbox", { name: /Calendar Pro widgets/ }).check();
+  await page.getByRole("button", { name: "Save & return" }).click();
+  await expect(
+    page.getByRole("button", { name: "Remove Calendar Pro widgets from Calendar Pro" }),
+  ).toBeVisible();
+  expect((await saved(page)).selected).toEqual({
+    "com.example.calendar": ["tasks", "com.example.calendar:calendar-pro-widgets"],
+  });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel(/What will you call it/).fill("Listing Test");
+  await page.getByRole("button", { name: "Preview the design brief" }).click();
+  const brief = page.locator(".document-body");
+  await expect(brief).toContainText(
+    `In the store listing (summarized by Claude Code, claude-haiku-5-5, prompt ${template}): Calendar Pro widgets; Sync across devices; Reminders`,
+  );
+  await expect(brief).toContainText(
+    "Reference: Calendar Pro (Google Play store listing, summarized by Claude Code)",
+  );
+  await expect(brief).toContainText("User journey: to be designed.");
+  await page.keyboard.press("Escape");
+  // The demo lists the feature and says it is not built.
+  await page.getByRole("button", { name: "Create my app" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your app is ready to try." }),
+  ).toBeVisible({ timeout: 10000 });
+  const app = page.frameLocator("iframe");
+  await app.getByRole("button", { name: "Calendar Pro widgets" }).click();
+  await expect(app.getByText("This feature comes from a store listing.")).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download project" }).click();
+  const zip = await JSZip.loadAsync(
+    await fs.readFile((await (await downloadPromise).path())!),
+  );
+  expect(await zip.file("README.md")!.async("string")).toContain(
+    "- Calendar Pro widgets (inspired by Calendar Pro; from the store listing, described in DESIGN.md but not built in this demo)",
+  );
+  // Saved with the workspace: a reload sends nothing new.
+  await page.reload();
+  await page.goto("/#/apps/com.example.calendar");
+  await expect(page.locator(".feature-card")).toHaveCount(4);
+  await expect(page.getByRole("checkbox", { name: /Calendar Pro widgets/ })).toBeChecked();
+  expect(requests).toHaveLength(1);
+});
+
+test("a listing that mentions no built-in feature shows no sample features", async ({
+  page,
+}) => {
+  await liveMarket(page, (scan) => {
+    const result = marketResult(scan.domain);
+    result.apps[0] = {
+      ...result.apps[0],
+      title: "Train Runner",
+      summary: "Help the crew escape from the grumpy inspector and his dog!",
+    };
+    return { status: 200, json: { result, cached: false } };
+  });
+  await liveClaude(page, undefined, false);
+  await start(page, { version: 1, domains: ["Games"], selected: {} });
+  await page.goto("/#/apps");
+  const card = page.locator(".reference-card", { hasText: "Train Runner" });
+  await expect(card.locator(".reference-footer")).toContainText("No features yet");
+  await expect(card.locator(".card-feature-tags span")).toHaveCount(0);
+  await card.click();
+  await expect(page.locator(".feature-card")).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "All app features" })).toHaveCount(0);
+  await expect(page.locator(".listed-status")).toContainText("Feature summaries are off.");
+  await expect(
+    page.getByText("Features appear here once Claude Code summarizes the store listing."),
+  ).toBeVisible();
+});
+
+test("without Claude Code the page says why, and a failed summary can be retried", async ({
+  page,
+}) => {
+  await liveMarket(page);
+  await liveClaude(page, undefined, false);
+  await start(page, { version: 1, domains: ["Finance"], selected: {} });
+  await page.goto("/#/apps");
+  await expect(page.locator(".reference-card")).toHaveCount(5);
+  await expect(page.locator(".feature-off")).toContainText(
+    "Feature summaries are off. Claude Code is not logged in.",
+  );
+  await page.locator(".reference-card").first().click();
+  await expect(page.locator(".listed-status")).toContainText(
+    "Feature summaries are off. Claude Code is not logged in.",
+  );
+  // Sample features stay selectable either way.
+  await expect(page.locator(".feature-card").first()).toBeVisible();
+  await page.getByRole("button", { name: "Back to app plan" }).click();
+
+  // Claude Code becomes available; the first request hits a usage limit.
+  const requests = await liveClaude(page, (req, call) =>
+    call === 1
+      ? {
+          status: 429,
+          json: { error: "Claude Code reached a usage limit. Try again later." },
+        }
+      : {
+          status: 200,
+          json: {
+            features: Object.fromEntries(
+              req.apps.map((a) => [
+                a.appId,
+                {
+                  items: listed(a.title),
+                  model: "claude-haiku-5-5",
+                  template,
+                  generatedAt: new Date().toISOString(),
+                },
+              ]),
+            ),
+          },
+        },
+  );
+  await page.locator(".feature-off").getByRole("button", { name: "Check again" }).click();
+  const row = page.locator('.market-rows li[data-domain="Finance"]');
+  await expect(row).toContainText("Claude Code reached a usage limit.");
+  await expect(page.locator(".feature-off")).toHaveCount(0);
+  // A failure is not retried on its own.
+  await page.waitForTimeout(300);
+  expect(requests).toHaveLength(1);
+  await page.getByRole("button", { name: "Retry features for Finance" }).click();
+  await expect(row).not.toContainText("usage limit");
+  await expect(page.locator(".card-feature-tags").first()).toContainText(
+    "Calendar Pro widgets",
+  );
+  expect(requests).toHaveLength(2);
+});
+
+for (const [field, label] of [
+  ["description", "store descriptions"],
+  ["iconUrl", "image links"],
+])
+  test(`a scan saved before apps had ${label} is rescanned once`, async ({
+    page,
+  }) => {
+    const scans = await liveMarket(page);
+    const old = JSON.parse(JSON.stringify(marketResult("Productivity")));
+    for (const app of old.apps) delete app[field];
+    await start(page, {
+      version: 1,
+      domains: ["Productivity"],
+      selected: {},
+      market: { Productivity: old },
+    });
+    await page.goto("/#/apps");
+    await expect.poll(() => scans).toEqual([{ domain: "Productivity", refresh: false }]);
+    await expect
+      .poll(async () => (await saved(page)).market.Productivity.apps[0][field])
+      .toBeTruthy();
+    await page.waitForTimeout(300);
+    expect(scans).toHaveLength(1);
+  });
+
+test("live apps show their Google Play icon and screenshots, with the first letter as a fallback", async ({
+  page,
+}) => {
+  await liveMarket(page);
+  const requests: { url: string; referer?: string }[] = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith("http://127.0.0.1"))
+      requests.push({ url: r.url(), referer: r.headers()["referer"] });
+  });
+  // Notes Daily's icon does not load.
+  await page.route("https://play-lh.googleusercontent.com/icon1=*", (r) =>
+    r.fulfill({ status: 404, body: "" }),
+  );
+  await start(page, { version: 1, domains: ["Productivity"], selected: {} });
+  await page.goto("/#/apps");
+  const icons = page.locator(".reference-card .app-icon");
+  await expect(icons).toHaveCount(5);
+  const first = icons.nth(0).locator("img");
+  // A small copy is requested, not the 512-pixel original.
+  await expect(first).toHaveAttribute(
+    "src",
+    "https://play-lh.googleusercontent.com/icon0=s128-rw",
+  );
+  await expect
+    .poll(() => first.evaluate((i: HTMLImageElement) => i.naturalWidth))
+    .toBeGreaterThan(0);
+  // A failed image and a missing icon both show the first letter.
+  await expect(icons.nth(1).locator("img")).toHaveCount(0);
+  await expect(icons.nth(1)).toHaveText("N");
+  await expect(icons.nth(4).locator("img")).toHaveCount(0);
+  await expect(icons.nth(4)).toHaveText("F");
+
+  await page.locator(".reference-card").first().click();
+  await expect(page.locator(".detail-title .app-icon img")).toHaveAttribute(
+    "src",
+    "https://play-lh.googleusercontent.com/icon0=s128-rw",
+  );
+  const shots = page.getByRole("region", {
+    name: "Calendar Pro screenshots from Google Play",
+  });
+  await expect(shots.getByRole("img")).toHaveCount(2);
+  await expect(
+    shots.getByRole("img", { name: "Calendar Pro screenshot 1" }),
+  ).toHaveAttribute("src", "https://play-lh.googleusercontent.com/shot0a=h560-rw");
+  // A screenshot that fails to load is left out.
+  await page.route("https://play-lh.googleusercontent.com/shot1a=*", (r) =>
+    r.fulfill({ status: 404, body: "" }),
+  );
+  await page.getByRole("button", { name: "Back to app plan" }).click();
+  await page.locator(".reference-card").nth(1).click();
+  await expect(
+    page.getByRole("region", { name: "Notes Daily screenshots from Google Play" }).getByRole("img"),
+  ).toHaveCount(1);
+  // Focus Flow has no icon but still shows its screenshots.
+  await page.goto("/#/apps/com.example.focus");
+  await expect(page.locator(".detail-title .app-icon")).toHaveText("F");
+  // Images come only from Google Play's image server, without a referrer.
+  expect(requests.length).toBeGreaterThan(0);
+  for (const r of requests) {
+    expect(r.url).toMatch(/^https:\/\/play-lh\.googleusercontent\.com\//);
+    expect(r.referer).toBeUndefined();
+  }
+});
+
+test("typed domains are kept and scanned as typed", async ({ page }) => {
+  const scans = await liveMarket(page);
+  await start(page);
+  const input = page.getByLabel("Your domains");
+  for (const text of ["health", "money", "  focus   timer ", "PRODUCTIVITY"]) {
+    await input.fill(text);
+    await input.press("Enter");
+  }
+  // Only a suggested domain's own name maps to that suggested domain.
+  expect((await saved(page)).domains).toEqual([
+    "health",
+    "money",
+    "focus timer",
+    "Productivity",
+  ]);
+  await expect(page.getByRole("button", { name: /^Wellness/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await expect(page.getByRole("button", { name: /^Productivity/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect
+    .poll(() => scans.map((s) => s.domain).sort())
+    .toEqual(["Productivity", "focus timer", "health", "money"]);
+  await input.fill("Health");
+  await input.press("Enter");
+  await expect(page.getByText("health is already on your list.")).toBeVisible();
 });

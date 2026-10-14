@@ -147,6 +147,14 @@
       text("h2", feature.name),
       text("p", feature.description, "muted"),
     );
+    if (feature.listed)
+      panel.append(
+        text(
+          "div",
+          "This feature comes from a store listing. DESIGN.md describes it; this template demo cannot build it yet.",
+          "empty",
+        ),
+      );
     const error = text("p", "", "error");
     error.setAttribute("role", "status");
     const fail = (m) => {

@@ -6,6 +6,9 @@ export type Feature = {
   icon: string;
   recommended?: boolean;
   flow: string;
+  // From the app's store listing (summarized by Claude Code), not one of the
+  // built-in features the browser demo can build.
+  listed?: boolean;
 };
 export type ReferenceApp = {
   id: string;
@@ -437,22 +440,12 @@ export const apps: ReferenceApp[] = [
 ];
 export const appById = Object.fromEntries(apps.map((a) => [a.id, a]));
 export const featureById = features as Record<string, Feature>;
+// Free text stays as typed (whitespace tidied); only a suggested domain's own
+// name, in any case, becomes that suggested domain.
 export function canonicalDomain(value: string) {
   const clean = value.trim().replace(/\s+/g, " ");
-  const aliases: Record<string, string> = {
-    focus: "Productivity",
-    pomodoro: "Productivity",
-    "focus timer": "Productivity",
-    health: "Wellness",
-    mindfulness: "Wellness",
-    education: "Learning",
-    money: "Finance",
-    creative: "Creativity",
-    exercise: "Fitness",
-  };
   return (
     domains.find((d) => d.name.toLowerCase() === clean.toLowerCase())?.name ||
-    aliases[clean.toLowerCase()] ||
     clean
   );
 }
