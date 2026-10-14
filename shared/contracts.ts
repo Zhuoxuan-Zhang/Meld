@@ -23,7 +23,8 @@ export type ChangeProposal = {
 export type Brief = { name: string; input: string; audience: string; purpose: string; goal: string; style: "warm" | "sage" | "ink"; domains: string[]; coreTasks?: string[]; requiredStates?: string[] };
 export type FeatureRequest = { id: string; name: string; description: string };
 export type Conflict = { id: string; question: string; kind: string; blocking: boolean; advanced?: boolean; options: { id: string; behavior: string; benefits: string[]; costs: string[]; requires_option_ids: string[]; incompatible_option_ids: string[] }[] };
-export type Decision = { id: string; kind: "merge_choices"; jobId: string; comparisonHash: string; conflicts: Conflict[] } | { id: string; kind: "design_changes"; proposal: ChangeProposal };
+export type HighLevelDesign = { revision: string; version: number; document: UserDocument; createdAt: string; approvedRevision?: string; developerRevision?: string };
+export type Decision = { id: string; kind: "high_level_changes"; baseRevision: string; document: UserDocument; response: string } | { id: string; kind: "merge_choices"; jobId: string; comparisonHash: string; conflicts: Conflict[] } | { id: string; kind: "design_changes"; proposal: ChangeProposal };
 export type JobStatus = "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed";
 export type PipelineProgress = {
   stage: "download" | "analysis" | "compare" | "merge" | "document" | "complete";
@@ -31,14 +32,14 @@ export type PipelineProgress = {
   steps: { id: string; label: string; status: "pending" | "running" | "completed" | "failed" | "waiting" }[];
   modelCalls?: number;
 };
-export type Job = { id: string; projectId: string; type: "research" | "design" | "change" | "confirm" | "restore" | "build"; status: JobStatus; phase: string; createdAt: string; updatedAt: string; result?: unknown; error?: { code: string; message: string }; missingInputs?: string[]; progress?: PipelineProgress; internalJobId?: string };
+export type Job = { id: string; projectId: string; type: "research" | "design" | "detail" | "change" | "confirm" | "restore" | "build"; status: JobStatus; phase: string; createdAt: string; updatedAt: string; result?: unknown; error?: { code: string; message: string }; missingInputs?: string[]; progress?: PipelineProgress; internalJobId?: string };
 export type Build = { id: string; revision: string; designHash: string; status: JobStatus; artifacts: { name: string; url: string; sha256: string }[]; validation?: { build: boolean; unitTests: boolean; lint: boolean; runtimeVerified: boolean; limitations: string[] } };
 export type Project = {
   id: string; version: number; createdAt: string; updatedAt: string; brief: Brief;
   references: Record<string, MarketResult>; featurePreferences: { selections: Record<string, string[]>; customRequests: FeatureRequest[] };
   designId: string | null; currentDesignRevision: string | null; approvedRevision: string | null;
   pendingDecision: Decision | null; activeJobId: string | null; latestBuild: Build | null; lastDeliveredBuild?: Build;
-  needsResearch: boolean; needsDesign: boolean; design?: DesignView;
+  highLevelVersion?: number; highLevelDesign?: HighLevelDesign; highLevelFeedback?: string; needsResearch: boolean; needsDesign: boolean; design?: DesignView;
   designHistory?: { designId: string; revision: string }[];
 };
 export type ApiError = { error: { code: string; message: string; details?: string[] } };

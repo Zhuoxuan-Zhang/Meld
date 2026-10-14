@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import HighLevelReview from "./HighLevelReview";
 import { Icon } from "./icons";
 import { api, action, projectUrl } from "./api";
 import type { Availability, ProjectList, Project, Job } from "./api";
@@ -38,6 +39,7 @@ export default function ProjectWorkspace() {
   const catalog = project ? buildCatalog(project.brief.domains, project.references, selections) : [];
   const referenceApps = [...catalog].filter(app => app.market && !app.market.retained).sort((a, b) => (b.market?.score || 0) - (a.market?.score || 0) || (a.market?.rank || 0) - (b.market?.rank || 0) || a.id.localeCompare(b.id)).slice(0, 5);
 
+  const outline = project?.needsResearch ? undefined : project?.highLevelDesign;
   const design = project?.needsDesign ? undefined : project?.design, decision = project?.pendingDecision;
   const navigate = (next: Step) => { setStep(next); setHistory(null); main.current?.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const load = useCallback(async (id: string) => {
@@ -70,6 +72,7 @@ export default function ProjectWorkspace() {
     };
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
   }, [pollingJobId, load, pollTick]);
+  useEffect(() => { if (job?.type === "detail" || job?.type === "build") setStep("app"); }, [job?.id]);
   useEffect(() => {
     setEdits({});
   }, [project?.currentDesignRevision]);
@@ -82,7 +85,7 @@ export default function ProjectWorkspace() {
   async function startJob(path: string, body: unknown) {
     const task = await api<Job>(path, body); setJob(task); const current = await load(task.projectId);
     if (!current.activeJobId) { const finished = await api<Job>(`/api/jobs/${task.id}`); setJob(finished); if (finished.status === "failed") setError(finished.error?.message || "This step could not finish."); }
-    setPollTick(value => value + 1); navigate(task.type === "build" ? "app" : "review");
+    setPollTick(value => value + 1); navigate(["build", "detail"].includes(task.type) ? "app" : "review");
   }
   async function describe() {
     await perform(async () => {
@@ -113,7 +116,7 @@ export default function ProjectWorkspace() {
   }
   async function confirm() {
     if (!project || !decision) return;
-    await perform(() => startJob(`${projectUrl(project.id)}/decisions/${decision.id}/confirm`, decision.kind === "merge_choices" ? { ...action(project), selections: decision.conflicts.map(conflict => ({ conflict_id: conflict.id, option_id: choices[conflict.id] })) } : { ...action(project), baseRevision: decision.proposal.base_revision, selectedChangeIds: selectedChanges }));
+    await perform(() => startJob(`${projectUrl(project.id)}/decisions/${decision.id}/confirm`, decision.kind === "high_level_changes" ? { ...action(project), baseRevision: decision.baseRevision } : decision.kind === "merge_choices" ? { ...action(project), selections: decision.conflicts.map(conflict => ({ conflict_id: conflict.id, option_id: choices[conflict.id] })) } : { ...action(project), baseRevision: decision.proposal.base_revision, selectedChangeIds: selectedChanges }));
   }
   function selectFeature(appId: string, featureId: string, checked: boolean) {
     setSelections(current => ({ ...current, [appId]: checked ? [...new Set([...(current[appId] || []), featureId])] : (current[appId] || []).filter(id => id !== featureId) }));
@@ -123,12 +126,12 @@ export default function ProjectWorkspace() {
     selectFeature(appId, feature.id, true);
     setCustom(current => [...current.filter(item => item.id !== feature.id), feature]);
   }
-  const featureNames = design?.document.features.map(f => f.title) || [...new Map([...catalog.flatMap(app => app.features.filter(f => selections[app.id]?.includes(f.id))), ...custom].map(feature => [feature.id, feature.name])).values()];
+  const featureNames = outline?.document.features.map(f => f.title) || design?.document.features.map(f => f.title) || [...new Map([...catalog.flatMap(app => app.features.filter(f => selections[app.id]?.includes(f.id))), ...custom].map(feature => [feature.id, feature.name])).values()];
   return <div className="studio"><a className="studio-skip" href="#studio-main">Skip to main content</a>
     <aside className={`studio-sidebar ${profileOpen ? "is-open" : ""}`} aria-label="Your app profile">
       <a className="studio-logo" href="/" onClick={event => { event.preventDefault(); navigate("describe"); }}><span><Icon name="Layers" size={24} /></span>meld<span className="studio-dot">.</span></a>
       <button className="studio-mobile-profile" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>Your app <Icon name="ChevronDown" size={18} /></button>
-      <div className="studio-profile"><p className="studio-eyebrow">YOUR APP</p><h2>{design?.document.title || project?.brief.name || "An idea worth making"}</h2><p>{project?.brief.goal || project?.brief.purpose || project?.brief.input || "Describe an idea. Make it yours. Bring it to life."}</p>
+      <div className="studio-profile"><p className="studio-eyebrow">YOUR APP</p><h2>{outline?.document.title || design?.document.title || project?.brief.name || "An idea worth making"}</h2><p>{project?.brief.goal || project?.brief.purpose || project?.brief.input || "Describe an idea. Make it yours. Bring it to life."}</p>
         {project?.brief.audience && <p className="studio-audience"><Icon name="Heart" size={15} /><span>{project.brief.audience}</span></p>}
         {featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
         {design && <span className="studio-pill">Design v{design.version}{project?.approvedRevision === design.revision ? " · approved" : " · ready to review"}</span>}
@@ -138,7 +141,7 @@ export default function ProjectWorkspace() {
     </aside>
     <div className="studio-body"><header className="studio-header"><span>Workspace <Icon name="ChevronRight" size={15} />{project?.brief.name || "Your next app"}</span><span className="studio-autosave"><i />{project ? "Saved" : "A little idea, a useful app"}</span></header>
       <main id="studio-main" ref={main} tabIndex={-1} className="studio-main">
-        <nav className="studio-steps" aria-label="App creation steps">{steps.map((item, index) => <button key={item.id} aria-current={step === item.id ? "step" : undefined} disabled={(item.id !== "describe" && !project) || (item.id === "app" && (!project?.latestBuild || project.latestBuild.revision !== project.currentDesignRevision || project.needsDesign))} onClick={() => navigate(item.id)}><span>{index + 1}</span>{item.label}</button>)}</nav>
+        <nav className="studio-steps" aria-label="App creation steps">{steps.map((item, index) => <button key={item.id} aria-current={step === item.id ? "step" : undefined} disabled={(item.id !== "describe" && !project) || (item.id === "app" && (job?.type !== "detail" && (!project?.latestBuild || project.latestBuild.revision !== project.currentDesignRevision || project.needsDesign)))} onClick={() => navigate(item.id)}><span>{index + 1}</span>{item.label}</button>)}</nav>
         {error && <div className="studio-error" role="alert"><Icon name="CircleAlert" size={18} /><div>{error}<button className="studio-text-button" onClick={() => { setError(""); if (project) void load(project.id); }}>Refresh project</button></div></div>}
         {loading ? <p role="status">Loading your app…</p> : <>
           {step === "describe" && <section className="studio-describe"><p className="studio-eyebrow">START WITH AN IDEA</p><h1>What would you love<br />your app to do?</h1><p className="studio-lead">Tell us what you need. We’ll find useful ideas, help you shape the experience, and turn your design into an Android app.</p>
@@ -150,12 +153,12 @@ export default function ProjectWorkspace() {
             {availability?.exampleId && <div className="studio-example"><Icon name="NotebookPen" size={24} /><div><strong>See how a notes app comes together</strong><p>Explore our existing Notes design in your own project.</p></div><button className="studio-text-button" disabled={busy} onClick={() => { void example(); }}>Try the Notes example <Icon name="ArrowRight" size={16} /></button></div>}
             {projects.length > 0 && <details className="studio-details studio-project-list"><summary>Continue a saved app</summary>{projects.slice(0, 8).map(p => <button className="studio-project-row" key={p.id} onClick={() => { void openProject(p.id); }}><strong>{p.name}</strong><span>{p.input}</span><Icon name="ArrowRight" size={16} /></button>)}</details>}
           </section>}
-          {step === "review" && project && <section><p className="studio-eyebrow">MAKE IT YOURS</p><h1>{design ? "Your app, in plain language." : "Choose features from the top reference apps."}</h1><p className="studio-lead">{design ? "Review what it will do, adjust the details, then approve the version you want to build." : "Review the top five apps found from market signals. Choose or customize their features, add your own, then confirm to generate your design document."}</p>
+          {step === "review" && project && <section><p className="studio-eyebrow">MAKE IT YOURS</p><h1>{outline || design ? "Your app, in plain language." : "Choose features from the top reference apps."}</h1><p className="studio-lead">{outline || design ? "Review what it will do, adjust the details, then approve the version you want to build." : "Review the top five apps found from market signals. Choose or customize their features, add your own, then confirm to generate your design document."}</p>
             {busy && <div className="studio-progress" role="status"><Icon name="LoaderCircle" size={21} /><div><strong>{job?.phase || "Working on your app…"}</strong><p>Your project is saved. You can come back to this page.</p></div></div>}
             {job?.progress && <PipelineStatus progress={job.progress} />}
             {job?.status === "waiting_inputs" && <div className="studio-card studio-waiting"><h2>Continue preparing your design.</h2><p>We can use available references and market information to continue.</p><button className="studio-button secondary" disabled={busy} onClick={() => { void perform(() => startJob(`/api/jobs/${job.id}/resume`, {})); }}>Continue generating design <Icon name="ArrowRight" size={16} /></button></div>}
             {project.needsResearch && !busy && <div className="studio-card"><h2>Start with a little research.</h2><p>We’ll look for relevant apps and useful feature ideas.</p><button className="studio-button primary" onClick={() => { void perform(() => startJob(`${projectUrl(project.id)}/research`, action(project))); }}>Explore ideas <Icon name="ArrowRight" size={16} /></button></div>}
-            {!project.needsResearch && project.needsDesign && !project.activeJobId && <div className="studio-card">
+            {!project.needsResearch && project.needsDesign && !outline && !project.activeJobId && <div className="studio-card">
               <h2>What would you like to keep?</h2><p>Top {referenceApps.length} reference apps, ranked by market-signal score. Their features come from store listings, not verified APK behavior.</p>
               <div className="studio-market-apps">{referenceApps.map((app, index) => <article className="studio-market-app" key={app.id} aria-label={`Reference app: ${app.name}`}>
                 <div className="studio-section-head"><div><p className="studio-eyebrow">REFERENCE #{index + 1}</p><h3>{app.name}</h3><p>{app.tagline}</p><p className="studio-note">{app.market?.rating === null ? "Not rated" : `${app.market?.rating?.toFixed(1)} stars`} · Market signal {app.market?.score}/15 · {app.market?.listedFeatures ? "Features from store description" : "Feature suggestions matched from listing keywords"}</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={14} /></a></div>
@@ -171,8 +174,9 @@ export default function ProjectWorkspace() {
               <p className="studio-note">Only your selected and custom features are requested. Selecting a reference does not include its entire app.</p>
               <button className="studio-button primary" disabled={busy || custom.some(feature => !feature.name.trim())} onClick={() => { void generate(); }}>Confirm features and generate design <Icon name="Sparkles" size={17} /></button>
             </div>}
+            {outline && <HighLevelReview project={project} busy={busy} save={document => { void perform(async () => { setProject(await api<Project>(`${projectUrl(project.id)}/high-level`, { expectedVersion: project.version, baseRevision: outline.revision, document }, "PATCH")); }); }} request={text => { void perform(() => startJob(`${projectUrl(project.id)}/changes`, { ...action(project), baseRevision: outline.revision, text, edits: [] })); }} confirm={() => { void confirm(); }} dismiss={() => { if (decision) void perform(async () => { setProject(await api<Project>(`${projectUrl(project.id)}/decisions/${decision.id}/dismiss`, { expectedVersion: project.version })); }); }} approve={() => { void perform(() => startJob(`${projectUrl(project.id)}/approve-outline`, { ...action(project), revision: outline.revision })); }} />}
             {decision?.kind === "merge_choices" && <div className="studio-card"><h2>A few choices shape your app.</h2><p>These reference apps take different approaches. Choose the experience you prefer.</p>{decision.conflicts.map(conflict => <ProductChoice key={conflict.id} conflict={conflict} value={choices[conflict.id]} choose={value => setChoices(current => ({ ...current, [conflict.id]: value }))} />)}{decision.conflicts.some(c => c.advanced) && <p className="studio-note">Implementation preferences have starting choices. Expand them to review or change those choices before confirming.</p>}<button className="studio-button primary" disabled={busy || decision.conflicts.some(c => !choices[c.id])} onClick={() => { void confirm(); }}>Use these choices <Icon name="Check" size={17} /></button></div>}
-            {design && !project.needsDesign && <>
+            {design && !project.needsDesign && !outline && <>
               <div className="studio-card studio-design"><div className="studio-section-head"><div><h2>{design.document.title}</h2><p>{design.document.summary}</p></div><span className="studio-pill">Version {design.version}</span></div><div className="studio-feature-grid">{design.document.features.map(feature => <article key={feature.id}><span className="studio-feature-icon"><Icon name="CircleCheck" size={21} /></span><h3>{feature.title}</h3><p>{feature.summary}</p><details className="studio-details"><summary>How it works</summary><ol>{feature.steps.map((text, index) => <li key={index}>{text}</li>)}</ol>{feature.examples.map(text => <p key={text}>For example: {text}</p>)}{feature.caveats.map(text => <p key={text}>{text}</p>)}</details><Evidence project={project} refs={feature.refs} /></article>)}</div>
                 <details className="studio-details"><summary>Pages and appearance</summary><p>{design.document.appearance}</p><div className="studio-screen-grid">{design.document.screens.map(screen => <article key={screen.id}><Icon name="Monitor" size={22} /><h3>{screen.title}</h3><p>{screen.purpose}</p></article>)}</div></details><details className="studio-details"><summary>Product choices and boundaries</summary>{design.document.choices.map(choice => <p key={choice.id}><strong>{choice.title}: </strong>{choice.selected} {choice.reason}</p>)}<ul>{design.document.boundaries.map(text => <li key={text}>{text}</li>)}</ul></details>
               </div>

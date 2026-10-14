@@ -7,6 +7,8 @@ import type { PipelineOptions } from "./adapters/pipeline";
 import { SignalsStore } from "./adapters/signals";
 import { buildCatalog } from "../../shared/market";
 import type { MarketResult } from "../../shared/market";
+import { HighLevelDocument } from "./high-level";
+import type { HighLevelRunner } from "./high-level";
 import type { Project, Job, Brief, ChangeProposal, Build, Conflict } from "../../shared/contracts";
 
 const key = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/);
@@ -18,11 +20,12 @@ export const Action = z.object({ requestKey: key, expectedVersion: z.number().in
 export const ChangeAction = Action.extend({ baseRevision: key, text: z.string().max(6000).default(""), edits: ChangeRequest.shape.edits });
 export const ConfirmAction = Action.extend({ baseRevision: key.optional(), selectedChangeIds: z.array(key).max(8).optional(), selections: z.array(z.object({ conflict_id: z.string().min(1).max(96), option_id: z.string().min(1).max(96) }).strict()).max(30).optional() });
 export const RestoreAction = Action.extend({ baseRevision: key, targetRevision: key });
+export const OutlinePatch = z.object({ expectedVersion: z.number().int().positive(), baseRevision: key, document: HighLevelDocument }).strict();
 export const BuildAction = Action.extend({ revision: key });
 type StoredJob = Job & { projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
-export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
+export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
 const publicProposal = (proposal: Awaited<ReturnType<DesignService["createProposal"]>>): ChangeProposal => ({ id: proposal.id, base_revision: proposal.base_revision, request_text: proposal.request_text, plan: { ...proposal.plan, changes: proposal.plan.changes.map(({ operations: _operations, ...change }) => change) } });
 const publicDesign = (view: Awaited<ReturnType<DesignService["get"]>>, projectId: string) => ({ ...view, artifacts: view.artifacts.map(artifact => ({ ...artifact, url: `/api/projects/${projectId}/artifacts/${view.revision}/${encodeURIComponent(artifact.name)}` })) });
 
@@ -111,11 +114,11 @@ export class ProjectService {
         const apps = new Map(catalog.map(app => [app.id, app]));
         for (const [appId, ids] of Object.entries(input.featurePreferences.selections)) if (!apps.has(appId) || ids.some(id => !apps.get(appId)!.features.some(f => f.id === id))) throw new WorkbenchError("invalid_feature", "Choose features from this project's reference apps.", 422);
         if (Object.values(input.featurePreferences.selections).flat().length > 100 || new Set(input.featurePreferences.customRequests.map(f => f.id)).size !== input.featurePreferences.customRequests.length) throw new WorkbenchError("invalid_feature", "Keep feature choices unique and within the project limit.", 422);
-        project.featurePreferences = input.featurePreferences;
+        project.featurePreferences = input.featurePreferences; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       if (input.brief) {
         if (semanticHash(project.brief.domains) !== semanticHash(input.brief.domains) || project.brief.input !== input.brief.input) { project.needsResearch = true; project.references = {}; project.featurePreferences.selections = {}; }
-        project.brief = input.brief;
+        project.brief = input.brief; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       project.version++; project.needsDesign = true; project.approvedRevision = null; project.pendingDecision = null; project.activeJobId = null;
     }, input.expectedVersion); return this.get(id);
@@ -170,17 +173,54 @@ export class ProjectService {
       await this.finish(job, p => { p.brief = result.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.approvedRevision = null; p.pendingDecision = null; p.featurePreferences.selections = {}; });
     });
   }
-  design(id: string, input: z.infer<typeof Action>) {
+  async saveOutline(project: Project, document: unknown) {
+    const parsed = HighLevelDocument.parse(document), version = (project.highLevelVersion || project.highLevelDesign?.version || 0) + 1;
+    const outline = { revision: `hl-v${String(version).padStart(4, "0")}-${semanticHash(parsed).slice(0, 12)}`, version, document: parsed, createdAt: new Date().toISOString() };
+    await write(path.join(this.options.directory, "high-level", project.id, outline.revision, "document.json"), outline);
+    project.brief.name = parsed.title; project.brief.audience = parsed.audience; project.brief.purpose = parsed.summary; project.highLevelVersion = version; project.highLevelDesign = outline; project.needsDesign = true; project.pendingDecision = null; project.approvedRevision = null;
+    return outline;
+  }
+  async patchOutline(id: string, input: z.infer<typeof OutlinePatch>) {
+    await this.mutate(id, async project => {
+      if (project.activeJobId) throw new WorkbenchError("busy", "Wait for the current task before editing the design.", 409);
+      if (project.highLevelDesign?.revision !== input.baseRevision || project.needsResearch) throw new WorkbenchError("stale_revision", "Edit the current high-level design.", 409);
+      await this.saveOutline(project, input.document); delete project.highLevelFeedback; project.version++;
+    }, input.expectedVersion); return this.get(id);
+  }
+  outline(id: string, input: z.infer<typeof Action>) {
     return this.start(id, "design", input, async job => {
       const project = await this.raw(id);
+      if (project.needsResearch || !this.options.highLevel) throw new WorkbenchError("research_required", "Review reference features before generating your design.", 422);
+      await this.progress(job, "Writing your high-level design…");
+      const started = Date.now(), result = await this.options.highLevel(project, path.join(this.options.directory, "runs", job.id));
+      if (!result.document) throw new WorkbenchError("design_incomplete", result.response, 422);
+      job.result = { elapsedMs: Date.now() - started, stage: "high_level" };
+      await this.finish(job, async project => { await this.saveOutline(project, result.document); project.highLevelFeedback = result.response; });
+    });
+  }
+  detail(id: string, input: z.infer<typeof BuildAction>) {
+    return this.start(id, "detail", input, async job => {
+      const project = await this.raw(id);
+      if (project.needsResearch || project.pendingDecision || project.highLevelDesign?.revision !== input.revision) throw new WorkbenchError("stale_revision", "Approve the current saved high-level design.", 409);
+      await this.publish(job, project => { project.highLevelDesign!.approvedRevision = input.revision; });
+      await this.submitPipeline(job, { revision: input.revision, document: project.highLevelDesign!.document });
+    });
+  }
+  design(id: string, input: z.infer<typeof Action>) {
+    if (this.options.highLevel) return this.outline(id, input);
+    return this.start(id, "design", input, job => this.submitPipeline(job));
+  }
+  async submitPipeline(job: StoredJob, approvedOutline?: { revision: string; document: unknown }) {
+      const project = await this.raw(job.projectId);
       if (project.needsResearch) throw new WorkbenchError("research_required", "Explore reference ideas before generating a design.", 422);
       const catalog = buildCatalog(project.brief.domains, project.references, project.featurePreferences.selections);
       const chosen = catalog.flatMap(app => app.features.filter(f => project.featurePreferences.selections[app.id]?.includes(f.id))).map(({ id, name, description }) => ({ id, name, description }));
-      const featureRequests = [...new Map([...chosen, ...project.featurePreferences.customRequests].map(feature => [feature.id, feature])).values()];
+      const approved = approvedOutline ? HighLevelDocument.parse(approvedOutline.document) : null;
+      const approvedFeatures = approved?.features.map(feature => ({ id: feature.id, name: feature.title, description: feature.summary })) || [];
+      const featureRequests = [...new Map([...chosen, ...project.featurePreferences.customRequests, ...approvedFeatures].map(feature => [feature.id, feature])).values()];
       const pipeline = await this.pipeline.submit(DesignInput.parse({ request_key: job.id, scan_ids: Object.values(project.references).map(scan => scan.scanId), brief: { name: project.brief.name || "My app", audience: project.brief.audience, purpose: project.brief.purpose || project.brief.input.slice(0, 600), goal: project.brief.goal, style: project.brief.style, coreTasks: project.brief.coreTasks, requiredStates: project.brief.requiredStates },
-        preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: featureRequests.map(f => f.id), feature_requests: featureRequests }));
+        preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: (approved ? approvedFeatures : featureRequests).map(f => f.id), feature_requests: featureRequests, ...(approvedOutline ? { approved_outline: approvedOutline } : {}) }));
       job.pipelineJobId = pipeline.id; await this.saveJob(job); await this.watchPipeline(job);
-    });
   }
   async watchPipeline(job: StoredJob) {
     while (true) {
@@ -200,8 +240,11 @@ export class ProjectService {
         await this.finish(job, project => {
           if (project.designId && project.currentDesignRevision) project.designHistory = [...(project.designHistory || []), { designId: project.designId, revision: project.currentDesignRevision }];
           project.designId = pipeline.design_id; project.currentDesignRevision = pipeline.result!.revision; project.needsDesign = false; project.approvedRevision = null; project.pendingDecision = null;
+          if (job.type === "detail" && project.highLevelDesign && project.highLevelDesign.approvedRevision === job.request.revision) project.highLevelDesign.developerRevision = pipeline.result!.revision;
           project.brief.name = pipeline.result!.document.title.slice(0, 60); project.brief.audience = pipeline.result!.document.audience.slice(0, 600); project.brief.purpose = pipeline.result!.document.summary.slice(0, 600);
-        }); return;
+        });
+        if (job.type === "detail") { const saved = await this.raw(job.projectId); await this.build(saved.id, { requestKey: `${job.id}-build`, expectedVersion: saved.version, revision: saved.currentDesignRevision! }); }
+        return;
       }
       await this.saveJob(job);
       if (["waiting_inputs", "waiting_user"].includes(pipeline.status)) return;
@@ -220,6 +263,11 @@ export class ProjectService {
       const indexFile = path.join(this.options.directory, "job-index.json"), index = await exists(indexFile) ? await json(indexFile) : {};
       const receipt = index[`${id}:${input.requestKey}`]; if (receipt && receipt.signature === semanticHash({ type: "confirm", input: { ...input, decisionId } })) return this.job(receipt.id);
       throw new WorkbenchError("stale_decision", "This decision is no longer pending. Reload your app.", 409);
+    }
+    if (decision.kind === "high_level_changes") {
+      return this.start(id, "confirm", { ...input, decisionId }, async job => {
+        await this.finish(job, async project => { if (project.highLevelDesign?.revision !== decision.baseRevision || input.baseRevision !== decision.baseRevision) throw new WorkbenchError("stale_revision", "Review changes for the current design.", 409); await this.saveOutline(project, decision.document); project.highLevelFeedback = decision.response; });
+      });
     }
     if (decision.kind === "merge_choices") {
       const file = path.join(this.options.directory, "job-index.json");
@@ -244,13 +292,20 @@ export class ProjectService {
   change(id: string, input: z.infer<typeof ChangeAction>) {
     return this.start(id, "change", input, async job => {
       const project = await this.raw(id);
+      if (project.highLevelDesign && this.options.highLevel) {
+        if (project.highLevelDesign.revision !== input.baseRevision) throw new WorkbenchError("stale_revision", "Use the current high-level design.", 409);
+        await this.progress(job, "Previewing your design changes…");
+        const result = await this.options.highLevel(project, path.join(this.options.directory, "runs", job.id), { text: input.text, document: project.highLevelDesign.document });
+        const document = result.document ? HighLevelDocument.parse(result.document) : null;
+        await this.finish(job, project => { project.highLevelFeedback = result.response; project.pendingDecision = document ? { id: `outline-${job.id}`, kind: "high_level_changes", baseRevision: input.baseRevision, document, response: result.response } : null; }); return;
+      }
       if (!project.designId || project.needsDesign) throw new WorkbenchError("design_required", "Generate a design matching the app profile before requesting changes.", 422);
       const proposal = await this.options.designs.createProposal(project.designId, ChangeRequest.parse({ base_revision: input.baseRevision, idempotency_key: input.requestKey, text: input.text, edits: input.edits }), job.id);
       await this.finish(job, p => { p.pendingDecision = { id: proposal.id, kind: "design_changes", proposal: publicProposal(proposal) }; });
     });
   }
   async dismiss(id: string, expectedVersion: number) {
-    await this.mutate(id, p => { if (p.pendingDecision?.kind !== "design_changes") throw new WorkbenchError("invalid_decision", "Resolve the initial product choices to continue.", 409); p.pendingDecision = null; p.version++; }, expectedVersion); return this.get(id);
+    await this.mutate(id, p => { if (!["design_changes", "high_level_changes"].includes(p.pendingDecision?.kind || "")) throw new WorkbenchError("invalid_decision", "Resolve the initial product choices to continue.", 409); p.pendingDecision = null; p.version++; }, expectedVersion); return this.get(id);
   }
   restore(id: string, input: z.infer<typeof RestoreAction>) {
     return this.start(id, "restore", input, async job => { const project = await this.raw(id); if (!project.designId) throw new WorkbenchError("design_required", "Create a design first.", 422);

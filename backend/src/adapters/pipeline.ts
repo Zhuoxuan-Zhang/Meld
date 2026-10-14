@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { DesignService, pipelineRoot, z, json, write, exists, fileSha, semanticHash, WorkbenchError, withLock, checkApk, Decisions, validateDecisions } from "../../../pipeline/dist/src/integration.js";
 import type { PipelineProgress } from "../../../shared/contracts";
+import { HighLevelDocument } from "../high-level";
 import type { ApkAcquirer } from "../apk-download";
 import { featureById } from "../../../shared/catalog";
 import { SignalsStore } from "./signals";
@@ -16,6 +17,7 @@ export const DesignInput = z.object({
   brief: z.object({ name: z.string().trim().min(1).max(60), audience: z.string().max(600), purpose: z.string().max(600), goal: z.string().max(600), style: z.enum(["warm", "sage", "ink"]), coreTasks: z.array(z.string().min(1).max(80)).min(1).max(12).optional(), requiredStates: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).min(1).max(6).optional() }).strict(),
   preferences: z.array(z.object({ app_id: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), feature_ids: z.array(z.string().min(1).max(240)).max(20) }).strict()).max(40),
   requested_features: z.array(z.string().min(1).max(240)).max(100).default([]),
+  approved_outline: z.object({ revision: identifier, document: HighLevelDocument }).strict().optional(),
   feature_requests: z.array(z.object({ id: z.string().min(1).max(240), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(100).default([]),
 }).strict();
 export type DesignInputValue = z.infer<typeof DesignInput>;
@@ -186,7 +188,7 @@ export class PipelineJobs {
       const directory = path.join(this.options.directory, job.id);
       let run = path.join(directory, "analysis");
       const described = new Map((job.input.feature_requests || []).map(feature => [feature.id, feature]));
-      const preferences = [...job.input.requested_features, ...job.input.preferences.flatMap(p => p.feature_ids)].map(id => {
+      const preferences = [...job.input.requested_features, ...(job.input.approved_outline ? [] : job.input.preferences.flatMap(p => p.feature_ids))].map(id => {
         const feature = described.get(id);
         if (!feature && Object.hasOwn(featureById, id)) return featureById[id].name;
         if (!feature) throw new WorkbenchError("invalid_feature", "Refresh your feature choices before resuming.");
@@ -195,8 +197,8 @@ export class PipelineJobs {
       const brief = { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: job.input.brief.coreTasks || ["create", "edit", "save", "find", "reopen"], ...(job.input.brief.requiredStates ? { required_states: job.input.brief.requiredStates } : {}), max_features: 5, max_navigation: 3, offline_only: true,
         implementation: "Android Kotlin / Jetpack Compose", excluded: ["accounts", "cloud sync"],
         reference_scopes: Object.fromEntries(locks.map(lock => [lock.appId, { core_tasks: ["reference_behavior"], scope: "Inspect representative local method behavior relevant to this reference's selected listing features. This is a scoped contribution, not full-app coverage. Store descriptions are leads, not APK facts. Keep unconfirmed feature wiring, lifecycle, persistence and remote-service behavior explicitly unknown. Do not require the source app to implement the target product's other features or screen states." }])),
-        scope: `${job.input.brief.purpose || job.input.brief.goal}. User-selected feature preferences: ${[...new Set(preferences)].join(", ")}. Visual preference: ${job.input.brief.style}. Preferences are product requests, not verified source-app behaviors.`,
-        market_signals: { scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
+        scope: `${job.input.brief.purpose || job.input.brief.goal}. ${job.input.approved_outline ? "Implement the approved high-level design in market_signals; preserve its features, flows, appearance, choices and exclusions. Reference APKs cannot override this approval." : ""} User-selected feature preferences: ${[...new Set(preferences)].join(", ")}. Visual preference: ${job.input.brief.style}. Preferences are product requests, not verified source-app behaviors.`,
+        market_signals: { ...(job.input.approved_outline ? { approved_high_level: job.input.approved_outline } : {}), scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
       const market = await json(path.join(directory, "market.json"));
       for (const app of market.apps) if (app.apk_sha256 && app.apk_sha256 !== locks.find(l => l.appId === app.appId)?.apk_sha256) throw new WorkbenchError("reference_changed", "Reference files changed; create a new design request.", 409);
       market.reference_apps ||= market.apps;
@@ -208,7 +210,7 @@ export class PipelineJobs {
       const runner = this.options.runner || processPipelineRunner(this.options.toolRoot);
       if (apks.length && job.execution !== "market") {
         job.execution = "apk"; await persist();
-        job.cli_exit_code = await runner({ run, apks, brief: path.join(directory, "brief.json"), market: path.join(directory, "market.json"), config, pauseForDecisions: this.options.pauseForDecisions });
+        job.cli_exit_code = await runner({ run, apks, brief: path.join(directory, "brief.json"), market: path.join(directory, "market.json"), config, pauseForDecisions: job.input.approved_outline ? false : this.options.pauseForDecisions });
       }
       const apkWaiting = await exists(path.join(run, "run.json")) && (await json(path.join(run, "run.json"))).status === "waiting_user";
       if (job.execution === "market" || !apks.length || !apkWaiting && !(await exists(path.join(run, "final/final-design.json")))) {
@@ -219,7 +221,7 @@ export class PipelineJobs {
         brief.scope += " Continue using market descriptions and explicit user feature requests when an APK is unavailable or its analysis is incomplete. These are proposed product behaviors, never verified source behavior. Only cite sources from validated supplied specs; features based on listings/user requests have empty sources and an explicit proposed_reason. Retain all requested features regardless of APK availability.";
         await write(path.join(directory, "market-brief.json"), brief);
         job.progress.steps[1].status = "completed"; job.progress.stage = "compare"; job.progress.steps[2].status = "running"; job.phase = "Comparing reference features…"; await persist();
-        job.cli_exit_code = await runner({ run, apks: [], brief: path.join(directory, "market-brief.json"), market: path.join(directory, "market.json"), config, basis: "market", staticRun, pauseForDecisions: this.options.pauseForDecisions });
+        job.cli_exit_code = await runner({ run, apks: [], brief: path.join(directory, "market-brief.json"), market: path.join(directory, "market.json"), config, basis: "market", staticRun, pauseForDecisions: job.input.approved_outline ? false : this.options.pauseForDecisions });
       }
       if (!(await exists(path.join(run, "final/final-design.json"))) && await exists(path.join(run, "synthesis/comparison.json")) && this.options.pauseForDecisions) {
         const state = await json(path.join(run, "run.json"));
