@@ -1,0 +1,5 @@
+[
+  {"id":"notally","repository":"OmGodse/Notally","name":"Notally","release":"v6.2","version":"6.2","package_name":"com.omgodse.notally","url":"https://github.com/OmGodse/Notally/releases/download/v6.2/Notally.v6.2.apk","filename":"Notally.v6.2.apk","sha256":"abb02148099be366a21b34da064184feded5cc97843ce23ffe53b16052091439"},
+  {"id":"fossify","repository":"FossifyOrg/Notes","name":"Fossify Notes","release":"1.7.0","version":"1.7.0","package_name":"org.fossify.notes","url":"https://github.com/FossifyOrg/Notes/releases/download/1.7.0/notes-13-foss-release.apk","filename":"notes-13-foss-release.apk","sha256":"5a56e0e39cc488e1f3b947d3801006d3b7450ec73c67f03195c64c5fd3b6bced"},
+  {"id":"markor","repository":"gsantner/markor","name":"Markor","release":"v2.16.1","version":"2.16.1","package_name":"net.gsantner.markor","url":"https://github.com/gsantner/markor/releases/download/v2.16.1/net.gsantner.markor-v163-2.16.1-flavorDefault-release.apk","filename":"net.gsantner.markor-v163-2.16.1-flavorDefault-release.apk","sha256":"e88cdcced7aa3dca25e6b9c7a9bdcfad3e3988ee545be951f42bf9441b5e46bf"}
+]

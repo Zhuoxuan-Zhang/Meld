@@ -1,0 +1,14 @@
+{
+  "provider": "codex_cli",
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "low",
+  "max_calls": 40,
+  "max_output_tokens": 12000,
+  "output_limit_enforcement": "post_response_validation",
+  "model_timeout_ms": 600000,
+  "tool_timeout_ms": 180000,
+  "resource_timeout_ms": 180000,
+  "max_expanded_bytes": 536870912,
+  "max_tool_rounds": 8,
+  "pricing": {"source": "ChatGPT-authenticated Codex CLI; API dollar rates do not establish subscription charges"}
+}

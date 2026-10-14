@@ -1,0 +1,9 @@
+node_modules/
+dist/
+runs/
+vendor/
+setup/
+tools/
+downloads/
+*.apk
+*.tsbuildinfo

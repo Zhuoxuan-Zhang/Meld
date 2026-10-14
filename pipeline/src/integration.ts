@@ -1,0 +1,16 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const parent = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+export const pipelineRoot = path.basename(parent) === 'dist' ? path.dirname(parent) : parent;
+export { DesignService } from './workbench/service.js';
+export { DesignJobs } from './workbench/jobs.js';
+export { ChangeRequest, ApplyRequest, RestoreRequest, Reference, RevisionData, UserDocument } from './workbench/schemas.js';
+export { WorkbenchError, semanticHash } from './workbench/validation.js';
+export { acquireLock, withLock } from './workbench/store.js';
+export { fileSha, json, write, exists, stopOwnedProcesses } from './storage.js';
+export { checkApk } from './resources.js';
+export { z } from 'zod';
+export type { DesignModel } from './workbench/model.js';
+export type { RevisionDataT, UserDocumentT, ChangePlanT } from './workbench/schemas.js';
+export type DesignView = Awaited<ReturnType<import('./workbench/service.js').DesignService['get']>>;
+export type DesignProposal = Awaited<ReturnType<import('./workbench/service.js').DesignService['createProposal']>>;

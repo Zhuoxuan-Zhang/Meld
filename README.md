@@ -1,5 +1,7 @@
 # New App Agent: App Market Scanner
 
+The `kevin` branch also includes the Meld frontend and its [interactive design-document workflow](docs/design-doc-interaction.md): market Top 5 → verified APK analysis → detailed design → readable explanation → user-confirmed edits. The confirmed developer JSON is exported for app generation. Run `scripts/dev.sh` with Node 24 to open the local studio. The standalone market collector below keeps its original interfaces and scoring behavior.
+
 A standalone market-research component: **input an app category, receive a ranked list of up to five Android apps** with public Google Play evidence.
 
 Extracted from the market-collection stage of [`copy_agent`](https://github.com/Zhuoxuan-Zhang/copy_agent), this project preserves its transparent 1–15 scoring formula and removes the downstream design, APK analysis, emulator, app-building, and presentation stages. It does not require an LLM, API key, Google account, or Android SDK.

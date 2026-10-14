@@ -21,6 +21,7 @@ export type ScanRunner = (
   signal: AbortSignal,
 ) => Promise<ScanOutcome>;
 export type MarketOptions = {
+  onResult?: (result: MarketResult) => Promise<MarketResult>;
   python: string;
   scannerDir: string;
   cacheDir?: string;
@@ -318,7 +319,8 @@ export function marketApi(options: MarketOptions): Plugin {
     };
     res.on("close", onClose);
     try {
-      send(res, 200, await scan(domain, input.refresh === true, controller.signal));
+      const output = await scan(domain, input.refresh === true, controller.signal);
+      send(res, 200, { ...output, result: options.onResult ? await options.onResult(output.result) : output.result });
     } catch (error) {
       if (error instanceof ScanError) send(res, error.status, { error: error.message });
       else send(res, 500, { error: "The market scan failed unexpectedly." });

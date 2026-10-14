@@ -1,0 +1,10 @@
+{
+  "target_users": "Individuals keeping personal offline notes",
+  "core_tasks": ["create", "edit", "save", "find", "reopen", "organize", "delete"],
+  "max_features": 5,
+  "max_navigation": 3,
+  "offline_only": true,
+  "implementation": "Kotlin / Jetpack Compose",
+  "excluded": ["accounts", "cloud sync", "team collaboration", "payments", "AI content generation"],
+  "scope": "Personal offline notes; Markor is limited to note-related behavior"
+}

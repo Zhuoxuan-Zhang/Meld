@@ -27,6 +27,7 @@ export type MarketApp = {
 };
 export type MarketStatus = "complete" | "partial" | "insufficient_results";
 export type MarketResult = {
+  scanId?: string;
   domain: string;
   category: string;
   genreId: string | null;
@@ -161,6 +162,7 @@ export function parseMarketResult(v: unknown): MarketResult {
   });
   return {
     domain,
+    ...(typeof v.scanId === "string" && /^scan-[a-f\d]{64}$/.test(v.scanId) ? { scanId: v.scanId } : {}),
     category: text(v.category, 120) || domain,
     genreId: text(v.genreId, 80) || null,
     queries: Array.isArray(v.queries)

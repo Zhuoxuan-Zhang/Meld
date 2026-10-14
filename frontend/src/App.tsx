@@ -21,6 +21,9 @@ import { Icon } from "./icons";
 import SuggestionPanel, { PlanSummary } from "./SuggestionPanel";
 import { suggestionSelection } from "./suggestions";
 import type { Suggestion } from "./suggestions";
+import DesignPanel from "./DesignPanel";
+import { designRequest, designUrl } from "./design";
+import "./design.css";
 import {
   demoHtml,
   designDoc,
@@ -181,7 +184,11 @@ function Modal({
   );
 }
 export default function App() {
-  const [draft, setDraft] = useState<Draft>(loadDraft);
+  const [draft, setDraft] = useState<Draft>(() => {
+    const saved = loadDraft(), id = new URLSearchParams(location.search).get("design");
+    if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(id)) return saved;
+    return { ...saved, designId: id, ...(saved.designId !== id ? { designJobId: undefined, designProposalId: undefined } : {}) };
+  });
   const [route, setRoute] = useState(routeNow);
   const [toast, setToast] = useState("");
   const [storageError, setStorageError] = useState(false);
@@ -237,6 +244,7 @@ export default function App() {
       ...d,
       ...patch,
       built: false,
+      ...(patch.selected || patch.domains || patch.name !== undefined || patch.audience !== undefined || patch.description !== undefined || patch.style ? { designId: undefined, designJobId: undefined, designProposalId: undefined } : {}),
       ...(patch.selected ? { plan: undefined } : {}),
       ...(patch.domains ? { plan: undefined, suggestion: undefined } : {}),
     }));
@@ -248,6 +256,7 @@ export default function App() {
       plan,
       selected: suggestionSelection(plan),
       built: false,
+      designId: undefined, designJobId: undefined, designProposalId: undefined,
       name: !d.name || d.name === d.plan?.name ? plan.name : d.name,
       audience:
         !d.audience || d.audience === d.plan?.audience
@@ -270,6 +279,7 @@ export default function App() {
       description: undoDraft.description,
       plan: undoDraft.plan,
       built: false,
+      designId: undefined, designJobId: undefined, designProposalId: undefined,
     }));
     setUndoDraft(null);
     notify("Your previous feature mix is restored.");
@@ -318,11 +328,11 @@ export default function App() {
       );
     if (!valid)
       destination = routeAppId && known && draft.domains.length ? "/apps" : "/domains";
-    else if (route !== "/domains" && !draft.domains.length)
+    else if (route !== "/domains" && !draft.domains.length && !(route === "/review" && draft.designId))
       destination = "/domains";
     else if (currentApp && !draft.domains.includes(currentApp.domain))
       destination = "/apps";
-    else if ((route === "/review" || route === "/result") && !merged.length)
+    else if ((route === "/review" || route === "/result") && !merged.length && !draft.designId)
       destination = "/apps";
     else if (route === "/result" && !draft.built) destination = "/review";
     if (destination) location.replace("#" + destination);
@@ -386,6 +396,7 @@ export default function App() {
       return {
         ...d,
         built: false,
+      designId: undefined, designJobId: undefined, designProposalId: undefined,
         plan: undefined,
         selected: {
           ...d.selected,
@@ -401,6 +412,7 @@ export default function App() {
     setDraft((d) => ({
       ...d,
       built: false,
+      designId: undefined, designJobId: undefined, designProposalId: undefined,
       plan: undefined,
       selected: {
         ...d.selected,
@@ -419,6 +431,7 @@ export default function App() {
       return {
         ...d,
         built: false,
+      designId: undefined, designJobId: undefined, designProposalId: undefined,
         plan: undefined,
         suggestion: undefined,
         domains,
@@ -506,7 +519,7 @@ export default function App() {
             const canGo =
               i === 0 ||
               (i === 1 && draft.domains.length > 0) ||
-              (i === 2 && merged.length > 0) ||
+              (i === 2 && (merged.length > 0 || Boolean(draft.designId))) ||
               (i === 3 && draft.built);
             return (
               <button
@@ -658,6 +671,7 @@ export default function App() {
               removeFeature={removeFeature}
               build={build}
               showDesign={() => setDialog("design")}
+              receiveMarket={(domain, result) => setDraft(d => withMarketResult(d, domain, result))}
             />
           )}
           {route === "/result" && draft.built && (
@@ -1743,6 +1757,7 @@ function ReviewPage({
   removeFeature,
   build,
   showDesign,
+  receiveMarket,
 }: {
   draft: Draft;
   selected: ReferenceApp[];
@@ -1752,10 +1767,17 @@ function ReviewPage({
   removeFeature: (a: string, f: string) => void;
   build: () => void;
   showDesign: () => void;
+  receiveMarket: (domain: string, result: MarketResult) => void;
 }) {
   const [error, setError] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
-  const submit = () => {
+  const directDesign = Boolean(draft.designId && new URLSearchParams(location.search).get("design"));
+  const submit = async () => {
+    if (draft.designId) {
+      try { const input = await designRequest<unknown>(`${designUrl(draft.designId)}/build-input`); saveFile(JSON.stringify(input, null, 2), `${draft.name || "app"}-build-input.json`, "application/json"); }
+      catch { setError("The approved design could not be exported. Try again."); }
+      return;
+    }
     if (!draft.name.trim()) {
       setError("Give your app a name before continuing.");
       nameRef.current?.focus();
@@ -1769,11 +1791,11 @@ function ReviewPage({
       <PageHead
         eyebrow="STEP 3 OF 4"
         title="Review your app"
-        description="Check your app brief and feature mix, then create your browser demo."
+        description={draft.designId ? "Review the experience and customize your design before Android app generation." : "Check your app brief and feature mix, then review the design or try a browser preview."}
       />
       <div className="review-layout">
         <div className="review-main">
-          {draft.plan && (
+          {!directDesign && draft.plan && (
             <section className="surface accepted-plan">
               <details>
                 <summary className="approved-summary">
@@ -1795,7 +1817,7 @@ function ReviewPage({
               </details>
             </section>
           )}
-          <section className="surface review-basics">
+          {!directDesign && <section className="surface review-basics">
             <div className="section-title">
               <div>
                 <h2>Your app brief</h2>
@@ -1893,8 +1915,9 @@ function ReviewPage({
                 ))}
               </div>
             </fieldset>
-          </section>
-          <section className="surface review-features">
+          </section>}
+          <DesignPanel draft={draft} update={update} receiveMarket={receiveMarket} />
+          {!directDesign && <section className="surface review-features">
             <div className="section-title">
               <div>
                 <h2>Your selected features</h2>
@@ -1955,7 +1978,7 @@ function ReviewPage({
                 part of a shared feature.
               </div>
             )}
-          </section>
+          </section>}
         </div>
         <aside className="create-panel">
           <div className="create-illustration" aria-hidden="true">
@@ -1968,35 +1991,34 @@ function ReviewPage({
             </b>
           </div>
           <h2>Ready to try it?</h2>
-          <p>Create a working demo and download the design documents.</p>
+          <p>{draft.designId ? "Send the approved detailed design to the app-generation pipeline." : "Try your feature mix in a browser, or generate and customize its design."}</p>
           <ul className="included-list">
             <li>
               <Icon name="Check" size={16} />
-              An interactive browser demo
+              {draft.designId ? "The approved developer design" : "An interactive browser demo"}
             </li>
             <li>
               <Icon name="Check" size={16} />
-              Your combined design document
+              {draft.designId ? "Your brief and confirmed choices" : "Your combined design document"}
             </li>
             <li>
-              <Icon name="Check" size={16} />A feature brief for each app
+              <Icon name="Check" size={16} />{draft.designId ? "Revision and evidence references" : "A feature brief for each app"}
             </li>
             <li>
               <Icon name="Check" size={16} />
-              Source files and a README
+              {draft.designId ? "Implementation status and generation input" : "Source files and a README"}
             </li>
           </ul>
-          <Button onClick={submit}>
-            Create my app
+          <Button onClick={() => { void submit(); }}>
+            {draft.designId ? "Export approved design" : "Create my app"}
             <Icon name="Sparkles" size={17} />
           </Button>
-          <button className="design-link" onClick={showDesign}>
+          <button className="design-link" onClick={draft.designId ? () => document.querySelector(".design-panel")?.scrollIntoView({ behavior: "smooth" }) : showDesign}>
             <Icon name="FileText" size={15} />
             Preview the design brief
           </button>
           <p className="fine-print">
-            This demo uses a template. Live coding and Android builds come
-            later.
+            {draft.designId ? "Design changes are saved separately from the current Android application." : "The browser preview uses a template. Use the design workflow for the Android implementation brief."}
           </p>
         </aside>
       </div>

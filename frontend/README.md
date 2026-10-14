@@ -1,5 +1,7 @@
 # Meld — a local app studio demo
 
+The [interactive design document](../docs/design-doc-interaction.md) is now integrated into Review. It supports real pipeline output, a readable English explanation, feature settings and free text, selectable proposals, confirmation, version recovery and approved developer-design exports. It uses the server’s Codex CLI login separately from optional OpenRouter planning. Market results are handed off as server-owned scan IDs; actual APK files are required for the analysis stage.
+
 Choose domains, see the hot apps in them from live Google Play market signals, get an AI suggestion for combining features, review the plan, and export an interactive browser demo. You can also select features yourself.
 
 ## Run locally

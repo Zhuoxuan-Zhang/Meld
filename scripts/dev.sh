@@ -58,7 +58,7 @@ open_url() {
   fi
 }
 
-# 1. Node.js 22.12+ or 24+. Loads nvm when node is not already on PATH.
+# 1. Node.js 22.19+ or 24+. Loads nvm when node is not already on PATH.
 if ! command -v node >/dev/null 2>&1; then
   NVM_SH="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
   if [ -s "$NVM_SH" ]; then
@@ -70,11 +70,17 @@ if ! command -v node >/dev/null 2>&1; then
   fi
 fi
 command -v node >/dev/null 2>&1 ||
-  fail "Meld needs Node.js 22.12 or newer. Install it from https://nodejs.org and run this again."
-node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' ||
-  fail "Meld needs Node.js 22.12 or newer; this computer has $(node -v)."
+  fail "Meld needs Node.js 22.19 or newer. Install it from https://nodejs.org and run this again."
+node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 19) ? 0 : 1)' ||
+  fail "Meld needs Node.js 22.19 or newer; this computer has $(node -v)."
 
 # 2. Frontend dependencies, installed again whenever package-lock.json changes.
+if [ ! -f "$ROOT/pipeline/node_modules/.package-lock.json" ] || [ "$ROOT/pipeline/package-lock.json" -nt "$ROOT/pipeline/node_modules/.package-lock.json" ]; then
+  say "Installing the design pipeline"
+  npm --prefix "$ROOT/pipeline" ci --no-audit --no-fund
+fi
+say "Compiling the design pipeline"
+npm --prefix "$ROOT/pipeline" run build
 cd "$FRONTEND"
 if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   say "Installing frontend dependencies"

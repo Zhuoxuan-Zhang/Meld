@@ -8,7 +8,8 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:4173",
-    channel: "chrome",
+    channel: process.env.MELD_BROWSER_EXECUTABLE ? undefined : "chrome",
+    launchOptions: process.env.MELD_BROWSER_EXECUTABLE ? { executablePath: process.env.MELD_BROWSER_EXECUTABLE } : {},
     headless: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

@@ -1,0 +1,10 @@
+{
+  "rea_repository": "https://github.com/morluto/rea.git",
+  "rea_commit": "8b4c3de3b3a3b580adec266f94f29ccedf1da228",
+  "node": "24.18.0",
+  "jdk": "21",
+  "jadx_version": "0.7.1",
+  "jadx_sha256": "6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75",
+  "apktool_version": "3.0.3",
+  "apktool_sha256": "dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423"
+}

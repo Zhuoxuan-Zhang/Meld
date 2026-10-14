@@ -14,6 +14,9 @@ export type Draft = {
   style: Style;
   built: boolean;
   goal: string;
+  designId?: string;
+  designJobId?: string;
+  designProposalId?: string;
   suggestion?: Suggestion;
   plan?: Suggestion;
   // Latest market-signal scan per domain.
@@ -84,6 +87,9 @@ export function loadDraft(): Draft {
       if (typeof raw[key] === "string")
         d[key] = raw[key].slice(0, key === "name" ? 60 : 600);
     if (["warm", "sage", "ink"].includes(raw.style)) d.style = raw.style;
+    if (typeof raw.designId === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(raw.designId)) d.designId = raw.designId;
+    if (typeof raw.designJobId === "string" && /^(job|pipeline)-[a-f\d-]{36}$/.test(raw.designJobId)) d.designJobId = raw.designJobId;
+    if (typeof raw.designProposalId === "string" && /^change-[a-f\d-]{36}$/.test(raw.designProposalId)) d.designProposalId = raw.designProposalId;
     for (const key of ["suggestion", "plan"] as const) {
       try {
         const plan = validateSuggestion(raw[key], d.domains, catalog(d));
