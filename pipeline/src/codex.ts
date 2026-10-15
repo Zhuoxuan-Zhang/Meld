@@ -13,7 +13,8 @@ export function parseCodex(response: any, schema: z.ZodType<any>, outputLimit: n
 }
 
 // Fresh ephemeral context; REA remains in the serial orchestrator.
-export async function executeCodex(dir: string, request: any, timeout: number) {
+export async function executeCodex(dir: string, request: any, timeout: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   await write(path.join(dir, 'schema.json'), request.schema);
   await write(path.join(dir, 'prompt.txt'), request.prompt);
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'apk-design-codex-'));
@@ -27,18 +28,34 @@ export async function executeCodex(dir: string, request: any, timeout: number) {
   await write(path.join(dir, 'command.json'), { command: 'codex', args, cwd, authentication: 'existing ChatGPT CLI login; API-key environment variables removed', output_limit: 'Checked after response; CLI does not expose the API max_output_tokens parameter.' });
   let stdout = '', stderr = '';
   try {
+    signal?.throwIfAborted();
     const execution: any = await new Promise((resolve, reject) => {
-      const child = spawn('codex', args, {cwd,env,stdio:['pipe','pipe','pipe']});
-      const untrack = trackOwnedProcess(child); let timedOut = false, exceeded = false;
-      const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeout);
+      // The npm launcher starts a native child. Stop the whole owned group so
+      // cancellation cannot leave that child running with the pipes open.
+      const detached = process.platform !== 'win32';
+      const child = spawn('codex', args, {cwd,env,detached,stdio:['pipe','pipe','pipe']});
+      let timedOut = false, exceeded = false;
+      const stop = () => {
+        if (detached && child.pid) {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        } else child.kill('SIGKILL');
+      };
+      const untrack = trackOwnedProcess(child, stop);
+      const abort = () => stop();
+      const timer = setTimeout(() => { timedOut = true; stop(); }, timeout);
+      const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); untrack(); };
+      signal?.addEventListener('abort', abort, { once: true });
       const collect = (stream: 'out'|'err', chunk: Buffer) => {
-        if (Buffer.byteLength(stdout)+Buffer.byteLength(stderr)+chunk.length > 16*1024*1024) { exceeded = true; child.kill('SIGKILL'); return; }
+        if (Buffer.byteLength(stdout)+Buffer.byteLength(stderr)+chunk.length > 16*1024*1024) { exceeded = true; stop(); return; }
         if (stream === 'out') stdout += chunk.toString(); else stderr += chunk.toString();
       };
       child.stdout.on('data',chunk=>collect('out',chunk)); child.stderr.on('data',chunk=>collect('err',chunk));
       child.stdin.on('error',()=>{}); child.stdin.end(request.prompt);
-      child.once('error',error=>{clearTimeout(timer);untrack();reject(error);});
-      child.once('close',(code,signal)=>{clearTimeout(timer);untrack();resolve({code,signal,timedOut,exceeded,elapsed_ms:Date.now()-start});});
+      child.once('error',error=>{cleanup();reject(error);});
+      child.once('close',(code,exitSignal)=>{cleanup();
+        if (signal?.aborted) reject(signal.reason);
+        else resolve({code,signal:exitSignal,timedOut,exceeded,elapsed_ms:Date.now()-start});
+      });
     });
     await write(path.join(dir,'events.jsonl'),redact(stdout));
     await write(path.join(dir,'stderr.log'),redact(stderr));

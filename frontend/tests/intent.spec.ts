@@ -48,6 +48,42 @@ test("failed clarification keeps the idea and offers retry without inventing a p
   await expect(page.getByRole("button", { name: "Confirm and find apps" })).toHaveCount(0);
   await page.reload(); await expect(page.getByLabel("What would you like to build?", { exact: true })).toHaveValue("A gaming app");
 });
+test("a busy idea check retries automatically and keeps the same input", async ({ page }) => {
+  const calls: unknown[] = [];
+  await page.route("**/api/intent/clarify", route => {
+    calls.push(route.request().postDataJSON());
+    return calls.length === 1
+      ? route.fulfill({ status: 429, json: { error: { code: "busy", message: "An earlier check is finishing." } } })
+      : route.fulfill({ json: { message: "Check your idea.", questions: [], plan: searchPlan } });
+  });
+  await page.goto("/");
+  await page.getByLabel("What would you like to build?", { exact: true }).fill("Offline notes for students");
+  await page.getByRole("button", { name: "Clarify my idea" }).click();
+  await expect(page.getByRole("region", { name: "Describe your idea" }).getByRole("status")).toContainText("retry automatically");
+  await expect(page.getByRole("button", { name: "Confirm and find apps" })).toBeVisible();
+  expect(calls).toHaveLength(2); expect(calls[1]).toEqual(calls[0]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+test("reset cancels a queued retry and a new idea can start immediately", async ({ page }) => {
+  const calls: string[] = [];
+  await page.route("**/api/intent/clarify", route => {
+    const { idea } = route.request().postDataJSON(); calls.push(idea);
+    return idea === "Old idea"
+      ? route.fulfill({ status: 429, json: { error: { code: "busy", message: "An earlier check is finishing." } } })
+      : route.fulfill({ json: { message: "Check your idea.", questions: [], plan: searchPlan } });
+  });
+  await page.goto("/");
+  await page.getByLabel("What would you like to build?", { exact: true }).fill("Old idea");
+  await page.getByRole("button", { name: "Clarify my idea" }).click();
+  await expect(page.getByRole("region", { name: "Describe your idea" }).getByRole("status")).toContainText("retry automatically");
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(page.getByLabel("What would you like to build?", { exact: true })).toBeEmpty();
+  await page.getByLabel("What would you like to build?", { exact: true }).fill("New idea");
+  await page.getByRole("button", { name: "Clarify my idea" }).click();
+  await expect(page.getByRole("button", { name: "Confirm and find apps" })).toBeVisible();
+  await page.waitForTimeout(2200); // The abandoned retry must not fire later.
+  expect(calls).toEqual(["Old idea", "New idea"]);
+});
 test("editing a pending idea discards a late response", async ({ page }) => {
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });

@@ -3,11 +3,18 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 const ownedProcesses = new Set<ChildProcess>();
-export function trackOwnedProcess(child: ChildProcess) {
+const ownedProcessStops = new Map<ChildProcess, () => void>();
+export function trackOwnedProcess(child: ChildProcess, stop?: () => void) {
   ownedProcesses.add(child);
-  return () => ownedProcesses.delete(child);
+  if (stop) ownedProcessStops.set(child, stop);
+  return () => { ownedProcesses.delete(child); ownedProcessStops.delete(child); };
 }
-export function stopOwnedProcesses() { for (const child of ownedProcesses) child.kill('SIGKILL'); }
+export function stopOwnedProcesses() {
+  for (const child of ownedProcesses) {
+    const stop = ownedProcessStops.get(child);
+    if (stop) stop(); else child.kill('SIGKILL');
+  }
+}
 
 export const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 export const fileSha = async (p: string) => sha(await fs.readFile(p));
