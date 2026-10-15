@@ -1,3 +1,4 @@
+import { detachedProcessGroup, stopProcessOnAbort } from "../../../shared/processes";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants, readdirSync, statSync } from "node:fs";
@@ -122,9 +123,11 @@ function processRunner(options: ClaudeOptions): ClaudeRunner {
     const bin = options.locate();
     if (!bin) throw new Error("not found");
     await mkdir(options.workDir, { recursive: true });
+    signal.throwIfAborted();
     return new Promise<ClaudeRun>((resolve, reject) => {
       const child = spawn(bin, args, {
         cwd: options.workDir,
+        detached: detachedProcessGroup,
         env: cliEnv(bin, options.env),
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -139,15 +142,9 @@ function processRunner(options: ClaudeOptions): ClaudeRunner {
       child.stderr.on("data", (chunk: string) => {
         if (stderr.length < 4000) stderr += chunk;
       });
-      const stop = () => {
-        child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 2000).unref();
-      };
-      if (signal.aborted) stop();
-      else signal.addEventListener("abort", stop, { once: true });
+      stopProcessOnAbort(child, signal);
       child.on("error", reject);
       child.on("close", (code) => {
-        signal.removeEventListener("abort", stop);
         resolve({ code, stdout, stderr });
       });
       // The CLI may exit before reading everything; that is reported by `close`.
@@ -344,23 +341,25 @@ export function createFeatureService(options: ClaudeOptions) {
   let running = 0;
   const waiting: (() => void)[] = [];
   const acquire = async (signal: AbortSignal) => {
+    signal.throwIfAborted();
     if (running >= 2) {
       if (waiting.length >= 8)
         throw new ClaudeError(429, "Too many feature requests are waiting. Try again shortly.");
       await new Promise<void>((resolve, reject) => {
         const ready = () => {
           signal.removeEventListener("abort", cancel);
+          running++;
           resolve();
         };
         const cancel = () => {
-          waiting.splice(waiting.indexOf(ready), 1);
+          const index = waiting.indexOf(ready);
+          if (index !== -1) waiting.splice(index, 1);
           reject(new ClaudeError(499, "Request canceled."));
         };
         waiting.push(ready);
         signal.addEventListener("abort", cancel, { once: true });
       });
-    }
-    running++;
+    } else running++;
   };
   const release = () => {
     running--;
@@ -412,12 +411,16 @@ export function createFeatureService(options: ClaudeOptions) {
     const controller = new AbortController();
     const stop = () => controller.abort();
     signal.addEventListener("abort", stop, { once: true });
+    if (signal.aborted) stop();
     const timer = setTimeout(stop, timeoutMs);
     const started = Date.now();
     let run: ClaudeRun;
     try {
+      controller.signal.throwIfAborted();
       run = await runner(args, prompt, controller.signal);
     } catch {
+      if (signal.aborted) throw new ClaudeError(499, "Request canceled.");
+      if (controller.signal.aborted) throw new ClaudeError(504, "Claude Code took too long. Please try again.");
       recheck();
       throw new ClaudeError(503, NOT_FOUND);
     } finally {
@@ -568,6 +571,7 @@ export function claudeApi(options: ClaudeOptions): Plugin {
         error: "Send one domain and up to eight apps with their store listings.",
       });
     }
+    if (res.destroyed) return;
     const controller = new AbortController();
     const onClose = () => {
       if (!res.writableFinished) controller.abort();

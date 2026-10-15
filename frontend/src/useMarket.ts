@@ -67,6 +67,7 @@ export function useMarket(
   }, [check]);
   const acquire = (signal: AbortSignal) =>
     new Promise<void>((resolve, reject) => {
+      signal.throwIfAborted();
       const s = slots.current;
       if (s.active < MAX_ACTIVE) {
         s.active++;
@@ -78,7 +79,8 @@ export function useMarket(
         resolve();
       };
       const cancel = () => {
-        s.waiting.splice(s.waiting.indexOf(start), 1);
+        const index = s.waiting.indexOf(start);
+        if (index !== -1) s.waiting.splice(index, 1);
         reject(new Error("canceled"));
       };
       s.waiting.push(start);
@@ -101,6 +103,7 @@ export function useMarket(
     try {
       await acquire(controller.signal);
       acquired = true;
+      controller.signal.throwIfAborted();
       if (requests.current.get(domain) === controller)
         settle(domain, { phase: "scanning", startedAt: Date.now() });
       const res = await fetch("/api/market/scan", {

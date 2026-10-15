@@ -38,6 +38,8 @@ export function useListedFeatures(
   const [connection, setConnection] = useState<FeatureConnection | null>(null);
   const [states, setStates] = useState<Record<string, FeatureState>>({});
   const requests = useRef(new Map<string, AbortController>());
+  const sources = useRef(new Map<string, string>());
+  const scanKey = (result?: MarketResult) => result ? `${result.scanId || ""}:${result.generatedAt}` : "";
   const slots = useRef({ active: 0, waiting: [] as (() => void)[] });
   const deliver = useRef(onFeatures);
   deliver.current = onFeatures;
@@ -74,6 +76,7 @@ export function useListedFeatures(
   }, [check]);
   const acquire = (signal: AbortSignal) =>
     new Promise<void>((resolve, reject) => {
+      signal.throwIfAborted();
       const s = slots.current;
       if (s.active < MAX_ACTIVE) {
         s.active++;
@@ -85,7 +88,8 @@ export function useListedFeatures(
         resolve();
       };
       const cancel = () => {
-        s.waiting.splice(s.waiting.indexOf(start), 1);
+        const index = s.waiting.indexOf(start);
+        if (index !== -1) s.waiting.splice(index, 1);
         reject(new Error("canceled"));
       };
       s.waiting.push(start);
@@ -102,6 +106,7 @@ export function useListedFeatures(
       requests.current.get(domain)?.abort();
       const controller = new AbortController();
       requests.current.set(domain, controller);
+      sources.current.set(domain, scanKey(result));
       const base = {
         appIds: apps.map((a) => a.appId),
         generatedAt: result.generatedAt,
@@ -113,6 +118,7 @@ export function useListedFeatures(
       try {
         await acquire(controller.signal);
         acquired = true;
+        controller.signal.throwIfAborted();
         if (requests.current.get(domain) === controller)
           settle(domain, { phase: "running", ...base });
         const res = await fetch("/api/claude/features", {
@@ -136,7 +142,7 @@ export function useListedFeatures(
           // Partial answers are kept; the rest wait for a retry, not a loop.
           if (Object.keys(features).length < apps.length)
             failure = "Claude Code returned features Meld could not use.";
-          if (Object.keys(features).length && !controller.signal.aborted)
+          if (Object.keys(features).length && !controller.signal.aborted && requests.current.get(domain) === controller)
             deliver.current(features);
         }
       } catch {
@@ -152,6 +158,7 @@ export function useListedFeatures(
       }
       if (requests.current.get(domain) !== controller) return;
       requests.current.delete(domain);
+      sources.current.delete(domain);
       settle(domain, failure ? { phase: "error", ...base, message: failure } : undefined);
     },
     [settle, includeReview],
@@ -172,9 +179,11 @@ export function useListedFeatures(
         summarize(domain, result);
     }
     for (const [domain, controller] of requests.current)
-      if (!domains.includes(domain)) {
+      if (!domains.includes(domain) || sources.current.get(domain) !== scanKey(market?.[domain])) {
         controller.abort();
         requests.current.delete(domain);
+        sources.current.delete(domain);
+        settle(domain);
       }
     for (const domain of Object.keys(states))
       if (!domains.includes(domain)) settle(domain);

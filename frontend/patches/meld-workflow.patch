@@ -1486,3 +1486,220 @@ index 62c37af..e0e3887 100644
  
  export const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
  export const fileSha = async (p: string) => sha(await fs.readFile(p));
+diff --git a/backend/src/adapters/claude.ts b/backend/src/adapters/claude.ts
+index 6cd50e8..45dc1f3 100644
+--- a/backend/src/adapters/claude.ts
++++ b/backend/src/adapters/claude.ts
+@@ -1,3 +1,4 @@
++import { detachedProcessGroup, stopProcessOnAbort } from "../../../shared/processes";
+ import { spawn } from "node:child_process";
+ import { createHash } from "node:crypto";
+ import { accessSync, constants, readdirSync, statSync } from "node:fs";
+@@ -122,9 +123,11 @@ function processRunner(options: ClaudeOptions): ClaudeRunner {
+     const bin = options.locate();
+     if (!bin) throw new Error("not found");
+     await mkdir(options.workDir, { recursive: true });
++    signal.throwIfAborted();
+     return new Promise<ClaudeRun>((resolve, reject) => {
+       const child = spawn(bin, args, {
+         cwd: options.workDir,
++        detached: detachedProcessGroup,
+         env: cliEnv(bin, options.env),
+         stdio: ["pipe", "pipe", "pipe"],
+       });
+@@ -139,15 +142,9 @@ function processRunner(options: ClaudeOptions): ClaudeRunner {
+       child.stderr.on("data", (chunk: string) => {
+         if (stderr.length < 4000) stderr += chunk;
+       });
+-      const stop = () => {
+-        child.kill("SIGTERM");
+-        setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+-      };
+-      if (signal.aborted) stop();
+-      else signal.addEventListener("abort", stop, { once: true });
++      stopProcessOnAbort(child, signal);
+       child.on("error", reject);
+       child.on("close", (code) => {
+-        signal.removeEventListener("abort", stop);
+         resolve({ code, stdout, stderr });
+       });
+       // The CLI may exit before reading everything; that is reported by `close`.
+@@ -344,23 +341,25 @@ export function createFeatureService(options: ClaudeOptions) {
+   let running = 0;
+   const waiting: (() => void)[] = [];
+   const acquire = async (signal: AbortSignal) => {
++    signal.throwIfAborted();
+     if (running >= 2) {
+       if (waiting.length >= 8)
+         throw new ClaudeError(429, "Too many feature requests are waiting. Try again shortly.");
+       await new Promise<void>((resolve, reject) => {
+         const ready = () => {
+           signal.removeEventListener("abort", cancel);
++          running++;
+           resolve();
+         };
+         const cancel = () => {
+-          waiting.splice(waiting.indexOf(ready), 1);
++          const index = waiting.indexOf(ready);
++          if (index !== -1) waiting.splice(index, 1);
+           reject(new ClaudeError(499, "Request canceled."));
+         };
+         waiting.push(ready);
+         signal.addEventListener("abort", cancel, { once: true });
+       });
+-    }
+-    running++;
++    } else running++;
+   };
+   const release = () => {
+     running--;
+@@ -412,12 +411,16 @@ export function createFeatureService(options: ClaudeOptions) {
+     const controller = new AbortController();
+     const stop = () => controller.abort();
+     signal.addEventListener("abort", stop, { once: true });
++    if (signal.aborted) stop();
+     const timer = setTimeout(stop, timeoutMs);
+     const started = Date.now();
+     let run: ClaudeRun;
+     try {
++      controller.signal.throwIfAborted();
+       run = await runner(args, prompt, controller.signal);
+     } catch {
++      if (signal.aborted) throw new ClaudeError(499, "Request canceled.");
++      if (controller.signal.aborted) throw new ClaudeError(504, "Claude Code took too long. Please try again.");
+       recheck();
+       throw new ClaudeError(503, NOT_FOUND);
+     } finally {
+@@ -568,6 +571,7 @@ export function claudeApi(options: ClaudeOptions): Plugin {
+         error: "Send one domain and up to eight apps with their store listings.",
+       });
+     }
++    if (res.destroyed) return;
+     const controller = new AbortController();
+     const onClose = () => {
+       if (!res.writableFinished) controller.abort();
+diff --git a/backend/src/adapters/market.ts b/backend/src/adapters/market.ts
+index 5d2ca3e..42f78d4 100644
+--- a/backend/src/adapters/market.ts
++++ b/backend/src/adapters/market.ts
+@@ -1,3 +1,4 @@
++import { detachedProcessGroup, stopProcessOnAbort } from "../../../shared/processes";
+ import { spawn } from "node:child_process";
+ import { createHash } from "node:crypto";
+ import { existsSync } from "node:fs";
+@@ -71,23 +72,19 @@ function processRunner(python: string, cwd: string): ScanRunner {
+         code: number | null;
+         stderr: string;
+       }>((resolve, reject) => {
++        signal.throwIfAborted();
+         const child = spawn(
+           python,
+           ["-m", "app_market", "scan", ...args, "--report", reportPath],
+-          { cwd, stdio: ["ignore", "ignore", "pipe"] },
++          { cwd, detached: detachedProcessGroup, stdio: ["ignore", "ignore", "pipe"] },
+         );
+         let stderr = "";
+         child.stderr.on("data", (chunk) => {
+           if (stderr.length < 4000) stderr += chunk.toString();
+         });
+-        const stop = () => {
+-          child.kill("SIGTERM");
+-          setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+-        };
+-        signal.addEventListener("abort", stop, { once: true });
++        stopProcessOnAbort(child, signal);
+         child.on("error", reject);
+         child.on("close", (code) => {
+-          signal.removeEventListener("abort", stop);
+           resolve({ code, stderr });
+         });
+       });
+@@ -154,23 +151,25 @@ export function createMarketService(options: MarketOptions) {
+   let running = 0;
+   const waiting: (() => void)[] = [];
+   const acquire = async (signal: AbortSignal) => {
++    signal.throwIfAborted();
+     if (running >= 2) {
+       if (waiting.length >= 8)
+         throw new ScanError(429, "Too many scans are waiting. Try again shortly.");
+       await new Promise<void>((resolve, reject) => {
+         const ready = () => {
+           signal.removeEventListener("abort", cancel);
++          running++;
+           resolve();
+         };
+         const cancel = () => {
+-          waiting.splice(waiting.indexOf(ready), 1);
++          const index = waiting.indexOf(ready);
++          if (index !== -1) waiting.splice(index, 1);
+           reject(new ScanError(499, "Scan canceled."));
+         };
+         waiting.push(ready);
+         signal.addEventListener("abort", cancel, { once: true });
+       });
+-    }
+-    running++;
++    } else running++;
+   };
+   const release = () => {
+     running--;
+@@ -221,11 +220,15 @@ export function createMarketService(options: MarketOptions) {
+     const controller = new AbortController();
+     const stop = () => controller.abort();
+     signal.addEventListener("abort", stop, { once: true });
++    if (signal.aborted) stop();
+     const timer = setTimeout(stop, timeoutMs);
+     let outcome: ScanOutcome;
+     try {
++      controller.signal.throwIfAborted();
+       outcome = await runner(args, controller.signal);
+     } catch {
++      if (signal.aborted) throw new ScanError(499, "Scan canceled.");
++      if (controller.signal.aborted) throw new ScanError(504, "The market scan took too long. Please try again.");
+       throw new ScanError(503, "The market scanner could not start. Run npm run setup:market, then try again.");
+     } finally {
+       clearTimeout(timer);
+@@ -319,6 +322,7 @@ export function marketApi(options: MarketOptions): Plugin {
+     )
+       return send(res, 400, { error: "Send one domain of up to 48 characters." });
+     const domain = canonicalDomain(input.domain);
++    if (res.destroyed) return;
+     const controller = new AbortController();
+     const onClose = () => {
+       if (!res.writableFinished) controller.abort();
+@@ -326,6 +330,7 @@ export function marketApi(options: MarketOptions): Plugin {
+     res.on("close", onClose);
+     try {
+       const output = await scan(domain, input.refresh === true, controller.signal);
++      controller.signal.throwIfAborted();
+       send(res, 200, { ...output, result: options.onResult ? await options.onResult(output.result) : output.result });
+     } catch (error) {
+       if (error instanceof ScanError) send(res, error.status, { error: error.message });
+diff --git a/shared/processes.ts b/shared/processes.ts
+new file mode 100644
+index 0000000..ba0bbc0
+--- /dev/null
++++ b/shared/processes.ts
+@@ -0,0 +1,22 @@
++import type { ChildProcess } from "node:child_process";
++import { trackOwnedProcess } from "../pipeline/dist/src/storage.js";
++
++export const detachedProcessGroup = process.platform !== "win32";
++
++// Launchers can leave a native child holding their output pipes. Each worker
++// owns its own group, so cancelling it also stops those descendants.
++export function stopProcessOnAbort(child: ChildProcess, signal: AbortSignal) {
++  let closed = false;
++  const stop = () => {
++    if (closed) return;
++    if (detachedProcessGroup && child.pid) {
++      try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
++    } else child.kill("SIGKILL");
++  };
++  const untrack = trackOwnedProcess(child, stop);
++  const cleanup = () => { closed = true; signal.removeEventListener("abort", stop); untrack(); };
++  child.once("error", cleanup);
++  child.once("close", cleanup);
++  if (signal.aborted) stop();
++  else signal.addEventListener("abort", stop, { once: true });
++}

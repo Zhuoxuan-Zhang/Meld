@@ -1,3 +1,4 @@
+import { detachedProcessGroup, stopProcessOnAbort } from "../../shared/processes";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -71,23 +72,19 @@ function processRunner(python: string, cwd: string): ScanRunner {
         code: number | null;
         stderr: string;
       }>((resolve, reject) => {
+        signal.throwIfAborted();
         const child = spawn(
           python,
           ["-m", "app_market", "scan", ...args, "--report", reportPath],
-          { cwd, stdio: ["ignore", "ignore", "pipe"] },
+          { cwd, detached: detachedProcessGroup, stdio: ["ignore", "ignore", "pipe"] },
         );
         let stderr = "";
         child.stderr.on("data", (chunk) => {
           if (stderr.length < 4000) stderr += chunk.toString();
         });
-        const stop = () => {
-          child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), 2000).unref();
-        };
-        signal.addEventListener("abort", stop, { once: true });
+        stopProcessOnAbort(child, signal);
         child.on("error", reject);
         child.on("close", (code) => {
-          signal.removeEventListener("abort", stop);
           resolve({ code, stderr });
         });
       });
@@ -154,23 +151,25 @@ export function marketApi(options: MarketOptions): Plugin {
   let running = 0;
   const waiting: (() => void)[] = [];
   const acquire = async (signal: AbortSignal) => {
+    signal.throwIfAborted();
     if (running >= 2) {
       if (waiting.length >= 8)
         throw new ScanError(429, "Too many scans are waiting. Try again shortly.");
       await new Promise<void>((resolve, reject) => {
         const ready = () => {
           signal.removeEventListener("abort", cancel);
+          running++;
           resolve();
         };
         const cancel = () => {
-          waiting.splice(waiting.indexOf(ready), 1);
+          const index = waiting.indexOf(ready);
+          if (index !== -1) waiting.splice(index, 1);
           reject(new ScanError(499, "Scan canceled."));
         };
         waiting.push(ready);
         signal.addEventListener("abort", cancel, { once: true });
       });
-    }
-    running++;
+    } else running++;
   };
   const release = () => {
     running--;
@@ -225,11 +224,15 @@ export function marketApi(options: MarketOptions): Plugin {
     const controller = new AbortController();
     const stop = () => controller.abort();
     signal.addEventListener("abort", stop, { once: true });
+    if (signal.aborted) stop();
     const timer = setTimeout(stop, timeoutMs);
     let outcome: ScanOutcome;
     try {
+      controller.signal.throwIfAborted();
       outcome = await runner(args, controller.signal);
     } catch {
+      if (signal.aborted) throw new ScanError(499, "Scan canceled.");
+      if (controller.signal.aborted) throw new ScanError(504, "The market scan took too long. Please try again.");
       throw new ScanError(503, "The market scanner could not start. Run npm run setup:market, then try again.");
     } finally {
       clearTimeout(timer);
@@ -320,6 +323,7 @@ export function marketApi(options: MarketOptions): Plugin {
       return send(res, 400, { error: "Send one domain of up to 48 characters." });
     if (input.queries !== undefined && (!Array.isArray(input.queries) || !input.queries.length || input.queries.length > 4 || input.queries.some(q => typeof q !== "string" || !q.trim() || q.length > 120))) return send(res, 400, { error: "Use one to four search phrases of up to 120 characters." });
     const domain = canonicalDomain(input.domain);
+    if (res.destroyed) return;
     const controller = new AbortController();
     const onClose = () => {
       if (!res.writableFinished) controller.abort();
@@ -327,6 +331,7 @@ export function marketApi(options: MarketOptions): Plugin {
     res.on("close", onClose);
     try {
       const output = await scan(domain, input.refresh === true, controller.signal, input.queries as string[] | undefined);
+      controller.signal.throwIfAborted();
       if (options.record) output.result = await options.record(output.result);
       send(res, 200, output);
     } catch (error) {

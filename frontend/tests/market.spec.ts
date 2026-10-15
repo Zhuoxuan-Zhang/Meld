@@ -66,6 +66,31 @@ test("search shows only progress, then real cards, then completed listing featur
   } finally { finishScan(); finishSummary(); await page.unrouteAll({ behavior: "wait" }); }
 });
 
+test("rescanning cancels the old summary and ignores its late result", async ({ page }) => {
+  let scans = 0, summaries = 0, releaseOld!: () => void;
+  const old = new Promise<void>(resolve => { releaseOld = resolve; });
+  await marketAvailable(page);
+  await page.route("**/api/market/scan", route => route.fulfill({ json: { result: { ...notes(), generatedAt: `2026-10-15T00:00:0${++scans}Z` } } }));
+  await page.route("**/api/claude/status", route => route.fulfill({ json: { available: true } }));
+  await page.route("**/api/claude/features", async route => {
+    const attempt = ++summaries;
+    if (attempt === 1) await old;
+    await route.fulfill({ json: { features: { "com.example.notes": { ...summary, items: [{ name: attempt === 1 ? "Old summary" : "Fresh notes", detail: "Write and save notes offline." }] } } } }).catch(() => undefined);
+  });
+  try {
+    await start(page);
+    await expect.poll(() => summaries).toBe(1);
+    await page.getByRole("button", { name: "Rescan", exact: true }).click();
+    await expect.poll(() => summaries).toBe(2);
+    await page.getByRole("button", { name: "Explore Notes Daily", exact: true }).click();
+    await expect(page.getByRole("checkbox", { name: /Fresh notes/ })).toBeVisible();
+    releaseOld();
+    await page.unrouteAll({ behavior: "wait" });
+    await expect(page.getByRole("checkbox", { name: /Old summary/ })).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("meld.workspace.v1")!).market.Productivity.apps[0].listedFeatures.items[0].name)).toBe("Fresh notes");
+  } finally { releaseOld(); await page.unrouteAll({ behavior: "wait" }); }
+});
+
 test("unavailable scanner stays empty and reconnecting runs a real scan", async ({ page }) => {
   await start(page);
   await expect(page.getByText("Disabled for this test.", { exact: false })).toBeVisible();
