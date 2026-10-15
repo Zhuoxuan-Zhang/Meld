@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import HighLevelReview from "./HighLevelReview";
+import ReferenceApps, { FeatureMix } from "./ReferenceApps";
 import { Icon } from "./icons";
 import { api, action, projectUrl } from "./api";
 import type { Availability, ProjectList, Project, Job } from "./api";
@@ -41,6 +42,7 @@ export default function ProjectWorkspace() {
 
   const outline = project?.needsResearch ? undefined : project?.highLevelDesign;
   const design = project?.needsDesign ? undefined : project?.design, decision = project?.pendingDecision;
+  const choosingFeatures = Boolean(project && !project.needsResearch && project.needsDesign && !outline && !project.activeJobId);
   const navigate = (next: Step) => { setStep(next); setHistory(null); main.current?.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const load = useCallback(async (id: string) => {
     const value = await api<Project>(projectUrl(id)); setProject(value); projectId.current = value.id;
@@ -133,7 +135,8 @@ export default function ProjectWorkspace() {
       <button className="studio-mobile-profile" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>Your app <Icon name="ChevronDown" size={18} /></button>
       <div className="studio-profile"><p className="studio-eyebrow">YOUR APP</p><h2>{outline?.document.title || design?.document.title || project?.brief.name || "An idea worth making"}</h2><p>{project?.brief.goal || project?.brief.purpose || project?.brief.input || "Describe an idea. Make it yours. Bring it to life."}</p>
         {project?.brief.audience && <p className="studio-audience"><Icon name="Heart" size={15} /><span>{project.brief.audience}</span></p>}
-        {featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
+        {!choosingFeatures && featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
+        {choosingFeatures && <FeatureMix apps={catalog} selections={selections} custom={custom} disabled={busy} remove={selectFeature} removeCustom={id => setCustom(current => current.filter(feature => feature.id !== id))} />}
         {design && <span className="studio-pill">Design v{design.version}{project?.approvedRevision === design.revision ? " · approved" : " · ready to review"}</span>}
         {project && <button className="studio-text-button" disabled={busy} onClick={() => { setBrief(project.brief); navigate("describe"); }}>Edit app profile <Icon name="NotebookPen" size={14} /></button>}
       </div>
@@ -160,13 +163,8 @@ export default function ProjectWorkspace() {
             {project.needsResearch && !busy && <div className="studio-card"><h2>Start with a little research.</h2><p>We’ll look for relevant apps and useful feature ideas.</p><button className="studio-button primary" onClick={() => { void perform(() => startJob(`${projectUrl(project.id)}/research`, action(project))); }}>Explore ideas <Icon name="ArrowRight" size={16} /></button></div>}
             {!project.needsResearch && project.needsDesign && !outline && !project.activeJobId && <div className="studio-card">
               <h2>What would you like to keep?</h2><p>Top {referenceApps.length} reference apps, ranked by market-signal score. Their features come from store listings, not verified APK behavior.</p>
-              <div className="studio-market-apps">{referenceApps.map((app, index) => <article className="studio-market-app" key={app.id} aria-label={`Reference app: ${app.name}`}>
-                <div className="studio-section-head"><div><p className="studio-eyebrow">REFERENCE #{index + 1}</p><h3>{app.name}</h3><p>{app.tagline}</p><p className="studio-note">{app.market?.rating === null ? "Not rated" : `${app.market?.rating?.toFixed(1)} stars`} · Market signal {app.market?.score}/15 · {app.market?.listedFeatures ? "Features from store description" : "Feature suggestions matched from listing keywords"}</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={14} /></a></div>
-                <div className="studio-feature-picks">{app.features.map(feature => {
-                  const override = custom.find(item => item.id === feature.id), value = override || feature;
-                  return <div className="studio-feature-choice" key={feature.id}><label><input type="checkbox" checked={selections[app.id]?.includes(feature.id) || false} onChange={event => selectFeature(app.id, feature.id, event.target.checked)} /><span><strong>{value.name}</strong><small>{value.description}</small>{override && <em>Customized for your app</em>}</span></label><details className="studio-feature-edit"><summary>Customize {feature.name}</summary><label>Feature name<input value={value.name} maxLength={120} onChange={event => customizeFeature(app.id, { id: feature.id, name: event.target.value, description: value.description })} /></label><label>How should it work?<textarea aria-label="How should it work?" value={value.description} rows={3} maxLength={1000} onChange={event => customizeFeature(app.id, { id: feature.id, name: value.name, description: event.target.value })} /></label></details></div>;
-                })}</div>{!app.features.length && <p className="studio-note">No feature summary is available for this listing. Add your own feature below.</p>}
-              </article>)}</div>
+              <ReferenceApps apps={referenceApps} selections={selections} custom={custom} disabled={busy} select={selectFeature} customize={customizeFeature} selectAll={(appId, ids) => { setSelections(current => ({ ...current, [appId]: ids })); if (!ids.length) setCustom(current => current.filter(feature => !catalog.find(app => app.id === appId)?.features.some(item => item.id === feature.id))); }} />
+              <div className="studio-mobile-mix"><FeatureMix apps={catalog} selections={selections} custom={custom} disabled={busy} remove={selectFeature} removeCustom={id => setCustom(current => current.filter(feature => feature.id !== id))} /></div>
               {!referenceApps.length && <p className="studio-note">No ranked reference apps are available. Try another search topic.</p>}
               {Object.values(project.references).flatMap(scan => scan.warnings.map(warning => <p className="studio-note" key={`${scan.domain}:${warning}`}>{warning}</p>))}
               <label className="studio-input-label">Your own feature idea<div className="studio-inline"><input value={featureInput} maxLength={120} onChange={event => setFeatureInput(event.target.value)} placeholder="Describe a feature you’d like to add" /><button className="studio-button secondary" disabled={!featureInput.trim() || custom.length >= 20} onClick={() => { setCustom(current => [...current, { id: `custom-${crypto.randomUUID()}`, name: featureInput.trim(), description: featureInput.trim() }]); setFeatureInput(""); }}>Add</button></div></label>
