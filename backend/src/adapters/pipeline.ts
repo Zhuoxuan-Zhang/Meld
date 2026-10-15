@@ -74,7 +74,11 @@ export class PipelineJobs {
           if (step.id === "compare") step.status = stages.compare ? "completed" : active === "compare" ? "running" : "pending";
           if (step.id === "merge") step.status = stages.design ? "completed" : state.status === "waiting_user" ? "waiting" : ["decide", "design"].includes(active) ? "running" : "pending";
         }
-        if (job.status === "running" && !["document", "complete"].includes(job.progress.stage)) job.phase = phase === "analysis" ? "Analyzing reference apps…" : phase === "compare" ? "Comparing reference features and identifying conflicts…" : "Merging your selected features into a detailed design…";
+        if (job.status === "running" && !["document", "complete"].includes(job.progress.stage)) job.phase = phase === "analysis" ? "Analyzing reference apps…" : phase === "compare" ? "Comparing reference features and identifying conflicts…" : state.calls?.at(-1)?.stage?.startsWith("design-text-repair") ? "Refining your detailed design…" : state.calls?.at(-1)?.stage?.startsWith("design-text-review") ? "Checking your detailed design…" : "Merging your selected features into a detailed design…";
+      }
+      if (job.status === "failed" && job.progress) {
+        const current = job.progress.steps.find(step => step.id === job.progress!.stage);
+        if (current) current.status = "failed";
       }
       return job;
     } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new WorkbenchError("not_found", "This design request was not found.", 404); throw error; }
@@ -128,7 +132,8 @@ export class PipelineJobs {
       const job = await this.get(id);
       if (!["waiting_inputs", "waiting_user", "failed"].includes(job.status)) return job;
       const market = await json(path.join(this.options.directory, job.id, "market.json"));
-      job.status = "queued"; job.phase = "Checking reference files…"; delete job.error; await write(this.file(id), job);
+      if (job.status === "failed") await write(path.join(this.options.directory, job.id, `failed-attempt-${Date.now()}.json`), job);
+      job.status = "queued"; job.phase = "Continuing from your saved progress…"; delete job.error; await write(this.file(id), job);
       this.enqueue(job, market.scans, market.reference_apps || market.apps); return job;
     }, 1000);
   }
@@ -230,7 +235,11 @@ export class PipelineJobs {
           job.status = "waiting_user"; job.phase = "Choose how your app should work."; job.conflicts = comparison.conflicts; job.comparison_hash = semanticHash(comparison); return;
         }
       }
-      if (!(await exists(path.join(run, "final/final-design.json")))) throw new WorkbenchError("analysis_failed", "Reference analysis did not finish. Your choices and diagnostics are saved.", 502);
+      if (!(await exists(path.join(run, "final/final-design.json")))) {
+        const state = await exists(path.join(run, "run.json")) ? await json(path.join(run, "run.json")) : null;
+        if (state?.active_stage === "design") throw new WorkbenchError("design_review_failed", "Your detailed design needs corrections before building. Saved progress is preserved; continue to repair it without starting over.", 422);
+        throw new WorkbenchError("analysis_failed", "Reference analysis did not finish. Your choices and diagnostics are saved.", 502);
+      }
       const review = await json(path.join(run, "synthesis/design-review.json"));
       if (!review.passed || review.issues.some((issue: { severity: string }) => issue.severity === "blocking")) throw new WorkbenchError("analysis_failed", "The detailed design did not pass its review.", 422);
       const actualPackages = (await json(path.join(run, "apps.lock.json"))).map((app: { package_name: string }) => app.package_name);

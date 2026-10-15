@@ -22,6 +22,11 @@ test("public pipeline progress follows persisted analysis, comparison and merge 
     job = await jobs.get(id); expect(job.progress!.stage).toBe("compare"); expect(job.progress!.steps.find(step => step.id === "analysis")!.status).toBe("completed"); expect(job.progress!.steps.find(step => step.id === "compare")!.status).toBe("running");
     state.stages.compare = {}; state.active_stage = "design"; await write(path.join(run, "run.json"), state);
     job = await jobs.get(id); expect(job.progress!.stage).toBe("merge"); expect(job.progress!.steps.find(step => step.id === "merge")!.status).toBe("running"); expect(job.phase).toContain("Merging");
+    state.calls = [{ stage: "design-text-repair-14" }]; await write(path.join(run, "run.json"), state);
+    expect((await jobs.get(id)).phase).toBe("Refining your detailed design…");
+    await write(path.join(directory, `${id}.json`), { id, status: "failed", phase: "Design stopped", progress });
+    expect((await jobs.get(id)).progress!.steps.find(step => step.id === "merge")!.status).toBe("failed");
+    await write(path.join(directory, `${id}.json`), { id, status: "running", phase: "Starting analysis", progress });
     state.status = "waiting_user"; await write(path.join(run, "run.json"), state);
     expect((await jobs.get(id)).progress!.steps.find(step => step.id === "merge")!.status).toBe("waiting");
   } finally { await rm(directory, { recursive: true, force: true }); }

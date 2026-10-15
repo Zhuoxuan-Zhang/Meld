@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { write } from "../../pipeline/dist/src/integration.js";
 import { HighLevelDocument } from "../../backend/src/high-level";
 import { z } from "../../pipeline/dist/src/integration.js";
 import { projectServer, idea } from "./project-fixtures";
@@ -67,4 +69,29 @@ test("high-level structured output uses a supported reference schema while rejec
   const schema = z.toJSONSchema(HighLevelDocument);
   expect(JSON.stringify(schema)).not.toContain('"not":');
   expect(HighLevelDocument.safeParse({ ...document, features: [{ ...document.features[0], refs: [{ kind: "feature", id: "invented-developer-reference" }] }] }).success).toBe(false);
+});
+
+
+test("failed detailed generation survives reload and resumes the same pipeline without losing approval", async ({ page }) => {
+  test.setTimeout(60000);
+  const api = await projectServer({ apks: false, highLevel: async () => ({ document: structuredClone(document), response: "Ready." }) });
+  try {
+    let project = await createOutline(api); const runner = api.service.pipeline.options.runner!;
+    api.service.pipeline.options.runner = async task => { await write(path.join(task.run, "run.json"), { status: "failed", active_stage: "design", stages: {}, calls: [], error: "Synthetic local design correction needed" }); return 1; };
+    const failed = await wait(api, await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision }));
+    expect(failed.status).toBe("failed"); expect(failed.error?.code).toBe("design_review_failed");
+    const pipelineId = (await api.service.storedJob(failed.id)).pipelineJobId;
+    await page.route("**/api/**", async route => { const request = route.request(), url = new URL(request.url()); const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined }); await route.fulfill({ response }); });
+    await page.goto(`/?project=${project.id}`); await expect(page.getByRole("heading", { name: "Your app preparation stopped." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Design preparation stopped" })).toBeVisible();
+    await page.reload(); await expect(page.getByRole("button", { name: "Continue from saved progress" })).toBeVisible();
+    api.service.pipeline.options.runner = runner;
+    await page.getByRole("button", { name: "Continue from saved progress" }).click(); await expect(page.getByRole("heading", { name: "Your Android app is ready." })).toBeVisible();
+    expect((await api.service.storedJob(failed.id)).status).toBe("failed");
+    project = await api.service.get(project.id); expect(project.highLevelDesign!.developerRevision).toBe(project.currentDesignRevision); expect(api.counts().buildCalls).toBe(1);
+    const files = await import("node:fs/promises"); const names = await files.readdir(path.join(api.options.directory, "jobs"));
+    const retries = await Promise.all(names.map(name => api.service.storedJob(name.slice(0, -5))));
+    expect(retries.some(job => job.id !== failed.id && job.pipelineJobId === pipelineId && job.status === "succeeded")).toBe(true);
+    const stale = await fetch(api.address + `/api/jobs/${failed.id}/resume`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); expect(stale.status).toBe(409);
+  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
 });

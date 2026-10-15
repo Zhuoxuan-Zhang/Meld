@@ -7,10 +7,39 @@ import { write, json, sha, fileSha, exists } from './storage.js';
 import { validateComparison, validateDecisions, validateDesign } from './validate.js';
 import { renderDesign } from './render.js';
 import { stage } from './state.js';
+import { designErrors } from './workbench/validation.js';
+import { DesignTextRepair, applyDesignTextRepair } from './design-repair.js';
 const DesignCore=UnifiedDesign.omit({pages:true,visual:true,compose:true});
 const DesignPages=UnifiedDesign.pick({pages:true});
 const DesignContracts=UnifiedDesign.pick({visual:true,compose:true});
 
+async function repairDesignText(run: string, state: any, model: Claude, base: any, comparison: any, decisions: any, draft: any, review: any, fragmentCalls: string[]) {
+  const dir = path.join(run, 'synthesis');
+  let design = draft;
+  const repairs: any[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const label = `design-text-repair-${state.calls.length}`;
+    const patch = await model.ask(label, 'Fix only the saved review issues with exact string replacements at JSON pointer paths relative to the design root, such as /features/3/acceptance/0/then or /pages/2/validation/4. Never prefix paths with /context or /design. Return the smallest set of edits. before must be the entire existing string at that path, after its corrected value. Preserve approved scope, IDs, source references, decisions and all unrelated behavior. Do not regenerate the design.', { design, review, approved_outline: base.brief.market_signals?.approved_high_level }, DesignTextRepair, value => {
+      try { return designErrors({ design: UnifiedDesign.parse(applyDesignTextRepair(design, value)), brief: base.brief, decisions }, comparison, base.specs); } catch (error) { return [String(error)]; }
+    });
+    const patchCall = state.calls.at(-1).id, sourceHash = sha(JSON.stringify(design));
+    design = UnifiedDesign.parse(applyDesignTextRepair(design, patch));
+    const candidateFile = `text-repair-candidate-${patchCall}.json`;
+    await write(path.join(dir, candidateFile), design);
+    const candidateHash = sha(JSON.stringify(design));
+    repairs.push({ call: patchCall, source_sha256: sourceHash, candidate_sha256: candidateHash, candidate_file: candidateFile });
+    review = await model.ask(`design-text-review-${state.calls.length}`, await model.prompt('review'), { kind: 'unified-design', ...base, comparison, decisions, design, program_errors: [], previous_review: review, correction: patch }, Review);
+    await write(path.join(dir, `text-repair-review-${patchCall}.json`), review);
+    await write(path.join(dir, `text-repair-record-${patchCall}.json`), { fragment_calls: fragmentCalls, repairs, review_call: state.calls.at(-1).id, review });
+    if (review.passed && !review.issues.some((issue: any) => issue.severity === 'blocking')) {
+      await write(path.join(dir, 'design-review.json'), review);
+      await write(path.join(run, 'final/final-design.json'), design); await renderDesign(path.join(run, 'final'), design);
+      await write(path.join(dir, 'design-assembly.json'), { provider: model.provider, mode: 'verified model fragments with guarded text repairs and whole-design review', fragment_calls: fragmentCalls, repairs, review_call: state.calls.at(-1).id, final_design_sha256: candidateHash, fields_generated_by_model: true, templates_used: false });
+      return true;
+    }
+  }
+  throw new Error('Detailed design needs attention after two local text repairs; saved draft and reviews are preserved');
+}
 async function codexDesign(run:string,state:any,model:Claude,base:any,comparison:any,decisions:any){
   const dir=path.join(run,'synthesis'),prompt=await model.prompt('design');
   let prior:any=null,review:any=null;
@@ -36,6 +65,9 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     if (!isDeepStrictEqual(joined, saved)) throw new Error('Saved draft differs from its actual model fragments');
     const reviews = (await fs.readdir(dir)).filter(file => file.startsWith(`fragment-review-${round}-`)).sort((a, b) => Number(b.match(/-(\d+)\.json$/)![1]) - Number(a.match(/-(\d+)\.json$/)![1]));
     prior = saved; review = reviews.length ? await json(path.join(dir, reviews[0])) : null; startRound = round + 1;
+    if (review && !designErrors({ design: prior, brief: base.brief, decisions }, comparison, base.specs).length && prior.status === 'final') {
+      await repairDesignText(run, state, model, base, comparison, decisions, prior, review, record.fragment_calls); return;
+    }
   }
   for(let round=startRound;round<startRound+3;round++){
     const before=state.calls.length;
@@ -44,7 +76,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     const contracts=await model.ask(`design-contracts-${round}`,prompt+'\nGenerate only visual and compose fields named by this output schema. Do not re-emit core or pages.',{brief:base.brief,decisions,core,pages:pages.pages,prior_contracts:prior?{visual:prior.visual,compose:prior.compose}:null,review,fragment:'contracts',instruction:'Preserve accepted visual tokens and contracts; apply only review corrections. Match entity names and page/event IDs exactly. Include actionable repositories, UiState/event/navigation contracts and short Kotlin examples. Define conflict/pending recovery from the pages. Aim for 2000 tokens.'},DesignContracts);
     const fragmentCalls=state.calls.slice(before).filter((c:any)=>c.success).map((c:any)=>c.id);
     const design:any=UnifiedDesign.parse({...core,...pages,...contracts});
-    const errors=validateDesign(design,base.brief,decisions,base.specs);
+    const errors=designErrors({ design, brief: base.brief, decisions }, comparison, base.specs);
     await write(path.join(dir,`fragment-design-${round}-${Date.now()}.json`),design);
     await write(path.join(dir,`fragment-validation-${round}-${Date.now()}.json`),{passed:!errors.length,errors,fragment_calls:fragmentCalls});
     review=await model.ask(`design-review-fragments-${round}`,await model.prompt('review'),{kind:'unified-design',...base,comparison,decisions,design,program_errors:errors},Review);
@@ -55,6 +87,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
       await write(path.join(dir,'design-assembly.json'),{provider:'codex_cli',mode:'three genuine schema fragments, followed by whole-design auxiliary review',fragment_calls:fragmentCalls,parsed_fragment_sha256:await Promise.all(fragmentCalls.map(async(id:string)=>({id,sha256:await fileSha(path.join(run,'calls',id,'parsed.json'))}))),final_design_sha256:sha(JSON.stringify(design)),review_call:state.calls.at(-1).id,fields_generated_by_model:true,templates_used:false});
       return;
     }
+    if (!errors.length && design.status === 'final') { await repairDesignText(run, state, model, base, comparison, decisions, design, review, fragmentCalls); return; }
     prior=design;review.issues.push(...errors.map(error=>({severity:'blocking',location:'program validation',issue:error,correction:'Fix referenced IDs, bounds and required mappings in the next fragments.'})));
   }
   throw new Error('Fragmented design remains draft after two targeted repairs');
@@ -99,5 +132,5 @@ export async function synthesize(run: string, state: any, claude: Claude, brief:
     await write(path.join(dir, 'design-review.json'), review);
     await write(path.join(run, 'final/final-design.json'), design); await renderDesign(path.join(run, 'final'), design);
     if (design.status !== 'final') throw new Error('Design remains draft after two targeted review repairs');
-  }, async () => validateDesign(await json(path.join(run, 'final/final-design.json')), brief, decisions, specs));
+  }, async () => designErrors({ design: await json(path.join(run, 'final/final-design.json')), brief, decisions }, comparison, specs));
 }

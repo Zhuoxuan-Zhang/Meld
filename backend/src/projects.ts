@@ -251,8 +251,23 @@ export class ProjectService {
       await new Promise(resolve => setTimeout(resolve, 600));
     }
   }
+  async latestJob(projectId: string): Promise<Job | null> {
+    await this.raw(projectId);
+    const directory = path.join(this.options.directory, "jobs");
+    if (!await exists(directory)) return null;
+    const jobs = await Promise.all((await fs.readdir(directory)).filter(name => /^job-[a-f\d-]{36}\.json$/.test(name)).map(name => this.storedJob(name.slice(0, -5))));
+    const latest = jobs.filter(job => job.projectId === projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    return latest ? this.job(latest.id) : null;
+  }
   async resume(id: string) {
     const job = await this.storedJob(id), project = await this.raw(job.projectId);
+    if (job.status === "failed" && job.pipelineJobId && ["detail", "design"].includes(job.type)) {
+      if (project.version !== job.projectVersion + 1 || project.activeJobId || job.type === "detail" && (project.highLevelDesign?.revision !== job.request.revision || project.highLevelDesign?.approvedRevision !== job.request.revision)) throw new WorkbenchError("stale_project", "The app profile or approved design changed. Start a new task.", 409);
+      return this.start(job.projectId, job.type, { ...job.request, requestKey: `${job.id}-resume-${project.version}`, expectedVersion: project.version }, async retry => {
+        retry.pipelineJobId = job.pipelineJobId; await this.saveJob(retry);
+        await this.pipeline.resume(job.pipelineJobId!); await this.watchPipeline(retry);
+      });
+    }
     if (project.version !== job.projectVersion || project.activeJobId !== id) throw new WorkbenchError("stale_project", "The app profile changed. Start a new task.", 409);
     if (job.status !== "waiting_inputs" || !job.pipelineJobId) throw new WorkbenchError("invalid_resume", "This task is not waiting for reference files.", 409);
     await this.pipeline.resume(job.pipelineJobId); job.status = "queued"; await this.saveJob(job); this.launch(() => this.run(job, j => this.watchPipeline(j))); return this.job(id);

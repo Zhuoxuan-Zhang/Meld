@@ -57,6 +57,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
         if (parts[4] === "dismiss") { const expected = z.object({ expectedVersion: z.number().int().positive() }).strict().parse(input); const p = await service.raw(id); if (p.pendingDecision?.id !== parts[3]) throw new WorkbenchError("stale_decision", "Reload the pending decision.", 409); return send(response, 200, await service.dismiss(id, expected.expectedVersion)); }
       }
       const project = await service.raw(id);
+      if (parts.length === 3 && parts[2] === "latest-job" && request.method === "GET") return send(response, 200, { job: await service.latestJob(id) });
       if (parts.length === 3 && parts[2] === "build-input" && request.method === "GET") return send(response, 200, await service.buildInput(id, url.searchParams.get("revision") || undefined));
       if (parts.length === 3 && parts[2] === "high-level" && request.method === "PATCH") return send(response, 200, await service.patchOutline(id, OutlinePatch.parse(await readBody(request))));
       if (parts.length === 3 && parts[2] === "revisions" && request.method === "GET") return send(response, 200, { revisions: await service.revisions(id) });
