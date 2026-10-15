@@ -1,3 +1,4 @@
+export { contrast, paletteErrors } from '../palette.js';
 import { isDeepStrictEqual } from 'node:util';
 import { sha } from '../storage.js';
 import { validateDecisions, validateDesign } from '../validate.js';
@@ -46,25 +47,12 @@ export function readableErrors(doc: UserDocumentT, data: RevisionDataT): string[
   for (const card of doc.choices) if (!data.decisions.selections.some(x => x.conflict_id === card.id) || !card.refs.some(x => x.kind === 'decision' && x.id === card.id)) errors.push(`Choice card must link its own decision ${card.id}`);
   return errors;
 }
-function colorRgb(value: string): number[] {
-  if (!/^#[\da-f]{6}$/i.test(value)) throw new WorkbenchError('invalid_color', 'Use a six-digit hexadecimal color');
-  return [1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16) / 255);
-}
-export function contrast(a: string, b: string): number {
-  const luminance = (value: string) => colorRgb(value).map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4).reduce((s, x, i) => s + x * [.2126, .7152, .0722][i], 0);
-  const [x, y] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (x + .05) / (y + .05);
-}
 export function designErrors(data: RevisionDataT, comparison: any, specs: any[]): string[] {
   const parsed = RevisionData.safeParse(data); if (!parsed.success) return [parsed.error.message];
   // Keep the original pipeline's provider contract intact; human ownership is stored separately.
   const providerCompatible = { ...data.decisions, chosen_by: 'codex_proxy' };
   const errors = [...validateDesign(data.design, data.brief, data.decisions, specs), ...validateDecisions(providerCompatible, comparison, specs)];
   try { refIndex(data); } catch (error) { errors.push(String(error)); }
-  const colors = Object.fromEntries(data.design.visual.colors.map(c => [c.role, c.value]));
-  for (const [a, b] of [['primary', 'onPrimary'], ['textPrimary', 'background'], ['textPrimary', 'surface']]) {
-    try { if (!colors[a] || !colors[b] || contrast(colors[a], colors[b]) < 4.5) errors.push(`Insufficient contrast ${a}/${b}`); } catch (error) { errors.push(String(error)); }
-  }
   if (!/kotlin|compose/i.test(data.brief.implementation)) errors.push('This workspace targets Android Kotlin / Compose');
   if (!data.decisions.global_consistency.offline) errors.push('This workspace retains the offline product boundary');
   return errors;

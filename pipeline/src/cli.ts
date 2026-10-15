@@ -22,7 +22,7 @@ process.env.JAVA_HOME ||= '/usr/lib/jvm/java-21-openjdk-amd64';
 process.env.REA_JADX_MCP_JAR ||= path.join(toolRoot, 'vendor/rea/_reference/apk-integration/jadx-headless-mcp-0.7.1-all.jar');
 process.env.REA_APKTOOL_COMMAND ||= path.join(toolRoot, 'tools/apktool');
 process.env.REA_JADX_HEAP_MIB ||= '4096'; process.env.REA_JADX_ACTIVE_PROCESSOR_COUNT ||= '4';
-const Brief = z.object({ target_users: z.string(), core_tasks: z.array(z.string()), project_name: z.string().optional(), market_signals: z.unknown().optional(), max_features: z.number().int().positive().max(5), max_navigation: z.number().int().positive().max(3), offline_only: z.literal(true), implementation: z.string(), excluded: z.array(z.string()), scope: z.string() });
+const Brief = z.object({ target_users: z.string(), core_tasks: z.array(z.string()), reference_scopes: z.record(z.string(), z.object({ core_tasks: z.array(z.string()).min(1), scope: z.string() })).optional(), required_states: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).optional(), project_name: z.string().optional(), market_signals: z.unknown().optional(), max_features: z.number().int().positive().max(5), max_navigation: z.number().int().positive().max(3), offline_only: z.literal(true), implementation: z.string(), excluded: z.array(z.string()), scope: z.string() });
 function parse(args: string[]) {
   const command = args.shift(); const opts: any = {};
   while (args.length) {
@@ -133,7 +133,9 @@ async function execute() {
     for (const app of apps) {
       app.path = path.join(run, 'apps', app.id, 'input.apk');
       const output = `apps/${app.id}/app-spec.json`, ev = `apps/${app.id}/evidence.json`;
-      await stage(run, state, `analyze-${app.id}`, [output, ev, `apps/${app.id}/review.json`, `apps/${app.id}/app-spec.md`], async () => { await analyze(root, run, app, rea!, claude, brief, state.config); }, async () => [...validateSpecData(await json(path.join(run, output)), await json(path.join(run, ev)), app), ...await validateEvidence(run, await json(path.join(run, ev)))]);
+      await stage(run, state, `analyze-${app.id}`, [output, ev, `apps/${app.id}/review.json`, `apps/${app.id}/app-spec.md`], async () => { const scoped = brief.reference_scopes?.[app.package_name];
+        const { required_states: _targetStates, ...sourceBrief } = brief;
+        await analyze(root, run, app, rea!, claude, scoped ? { ...sourceBrief, core_tasks: scoped.core_tasks, scope: scoped.scope, analysis_role: 'Reference method behavior only. Target screen states, target persistence guarantees and other game modes are not source-completeness requirements. Keep unconfirmed caller wiring and initialization as explicit unknowns.' } : brief, state.config); }, async () => [...validateSpecData(await json(path.join(run, output)), await json(path.join(run, ev)), app), ...await validateEvidence(run, await json(path.join(run, ev)))]);
       specs.push(await json(path.join(run, output)));
     }
     await write(path.join(run, 'validation/static-tools.json'), { passed: true, apps: apps.map((a: any) => ({ app_id: a.id, package_name: a.package_name, sha256: a.sha256 })), tools: [...rea.schemas.keys()], rea_revision: fp.tools.lock.rea_commit, limitations: ['Static tools only; upstream verify:android bootstrap failure is separately logged, not counted as passed.'] });

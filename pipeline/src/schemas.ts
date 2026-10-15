@@ -47,7 +47,7 @@ export const UnifiedDesign = z.object({
 });
 export const Plan = z.object({
   tasks: A, missing_evidence: A, ready_for_spec: z.boolean(),
-  actions: z.array(z.object({ tool: z.enum(['search_android_classes', 'inspect_android_class', 'inspect_android_method', 'trace_android_references', 'read_artifact']), query: S, class_name: S, method_name: S, overload_index: z.number().int().nullable(), path: S, offset: z.number().int(), limit: z.number().int(), reason: S })),
+  actions: z.array(z.object({ tool: z.enum(['search_android_classes', 'inspect_android_class', 'inspect_android_method', 'inspect_android_bytecode', 'trace_android_references', 'read_artifact']), query: S, class_name: S, method_name: S, overload_index: z.number().int().nullable(), path: S, offset: z.number().int(), limit: z.number().int(), reason: S })),
 });
 export const Review = z.object({ passed: z.boolean(), issues: z.array(z.object({ severity: z.enum(['blocking', 'minor']), location: S, issue: S, correction: S })), limitations: A });
 export const Selection = z.object({ selected: A, reason: S, limitations: A });

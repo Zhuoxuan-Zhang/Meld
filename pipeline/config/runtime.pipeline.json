@@ -1,6 +1,6 @@
 {
   "provider": "codex_cli",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-5.6-sol",
   "reasoning_effort": "low",
   "max_calls": 120,
   "max_output_tokens": 12000,

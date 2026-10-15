@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { validateSpecData, validateDecisions, validateDesign, validateEvidence, validateComparison, validateRun } from '../src/validate.js';
 import { checkApk } from '../src/resources.js';
+import { renderDesign } from '../src/render.js';
+import { controls } from '../src/workbench/changes.js';
 import { fileSha, inside, execLogged, redact } from '../src/storage.js';
 
 const app = { id: 'a', sha256: 'hash', package_name: 'example.a' };
@@ -12,7 +14,7 @@ const spec = () => ({ app_id: 'a', package_name: 'example.a', version: '1', apk_
 const comparison = (): any => ({ tasks: [{ id: 't', task: 'create', sources: [{ app_id: 'a', feature_id: 'a-create' }], common: [], differences: [], relationship: 'tradeoff', dependencies: [], unknowns: [] }], conflicts: [{ id: 'c1', question: 'Storage?', kind: 'hard_conflict', blocking: true, sources: [], options: [{ id: 'room', behavior: 'database', benefits: [], costs: [], requires_option_ids: [], incompatible_option_ids: ['files'] }, { id: 'files', behavior: 'filesystem', benefits: [], costs: [], requires_option_ids: [], incompatible_option_ids: ['room'] }] }], coverage: [] });
 const decisions = () => ({ chosen_by: 'claude_proxy', selections: [{ conflict_id: 'c1', option_id: 'room', reason: 'Local entity consistency', rejected: [{ option_id: 'files', reason: 'Not selected' }], assumptions: [], sources: [] }], global_consistency: { offline: true, features_within_limit: true, navigation_within_limit: true, compatible: true, explanation: 'fixture' } });
 function design(): any {
-  return { title: 'Fixture only', status: 'draft', behavior_classification: 'proposed', scope: { target_users: 'test', core_tasks: ['create','edit','save','find','reopen'], included: [], excluded: [], constraints: [] }, features: [{ id: 'f', title: 'Notes', task: 'notes', behavior: 'fixture', page_ids: ['p'], flow_ids: [], sources: [], proposed_reason: 'fixture', acceptance: [{ id: 'ac', given: 'note', when: 'save', then: 'saved' }] }], entities: [], flows: [], navigation: [{ label: 'Notes', page_id: 'p', parameters: [] }], pages: [{ id: 'p', title: 'Notes', purpose: 'fixture', entries: [], components: [{ id: 'btn', parent_id: '', type: 'Button', text: 'Save', binding: '', event_ids: ['save'] }], events: [{ id: 'save', trigger: 'tap', action: 'persist', state_change: 'saved', target_page_id: '', error_recovery: 'retry' }], validation: [], states: ['normal','empty','no_results','error','delete_confirmation','unsaved_changes'].map(kind => ({ id: kind, kind, condition: 'fixture', message: '', component_ids: ['btn'], event_ids: ['save'] })), keyboard_focus: 'fixture', back_behavior: 'fixture', long_text: 'fixture', font_scaling: 'fixture', accessibility: [] }], visual: { colors: [], typography: [], spacing: [], corners: [], icons: [] }, compose: { components: [], ui_states: ['fixture'], events: [], navigation_parameters: [], repository_responsibilities: ['persist'], type_examples: [] }, decisions: ['room'], unknowns: [], assumptions: [], validation_needed: [] };
+  return { title: 'Fixture only', status: 'draft', behavior_classification: 'proposed', scope: { target_users: 'test', core_tasks: ['create','edit','save','find','reopen'], included: [], excluded: [], constraints: [] }, features: [{ id: 'f', title: 'Notes', task: 'notes', behavior: 'fixture', page_ids: ['p'], flow_ids: [], sources: [], proposed_reason: 'fixture', acceptance: [{ id: 'ac', given: 'note', when: 'save', then: 'saved' }] }], entities: [], flows: [], navigation: [{ label: 'Notes', page_id: 'p', parameters: [] }], pages: [{ id: 'p', title: 'Notes', purpose: 'fixture', entries: [], components: [{ id: 'btn', parent_id: '', type: 'Button', text: 'Save', binding: '', event_ids: ['save'] }], events: [{ id: 'save', trigger: 'tap', action: 'persist', state_change: 'saved', target_page_id: '', error_recovery: 'retry' }], validation: [], states: ['normal','empty','no_results','error','delete_confirmation','unsaved_changes'].map(kind => ({ id: kind, kind, condition: 'fixture', message: '', component_ids: ['btn'], event_ids: ['save'] })), keyboard_focus: 'fixture', back_behavior: 'fixture', long_text: 'fixture', font_scaling: 'fixture', accessibility: [] }], visual: { colors: [{ role: 'primary', value: '#315DA8' }, { role: 'onPrimary', value: '#FFFFFF' }, { role: 'background', value: '#FAFAFA' }, { role: 'surface', value: '#FFFFFF' }, { role: 'textPrimary', value: '#202124' }], typography: [], spacing: [], corners: [], icons: [] }, compose: { components: [], ui_states: ['fixture'], events: [], navigation_parameters: [], repository_responsibilities: ['persist'], type_examples: [] }, decisions: ['room'], unknowns: [], assumptions: [], validation_needed: [] };
 }
 describe('evidence and decision risk validation (isolated fixtures)', () => {
   it('rejects missing and cross-app references', () => {
@@ -141,4 +143,45 @@ it('validates fallback method text against the retained disassembled class bytes
   expect(await validateEvidence(root,[e])).toEqual([]);
   await writeFile(path.join(root,'class.smali'),'.class Ldifferent;');
   expect((await validateEvidence(root,[e])).join()).toContain('Invalid derived smali');
+});
+
+it('validates game tasks and required states from the brief without inventing notes behavior', () => {
+  const d = design(); d.scope.core_tasks = ['play', 'save', 'resume'];
+  d.pages[0].states = d.pages[0].states.filter((s: any) => ['normal', 'error'].includes(s.kind));
+  const brief = { max_features: 5, max_navigation: 3, core_tasks: ['play', 'save', 'resume'], required_states: ['normal', 'error'] };
+  expect(validateDesign(d, brief, decisions(), [spec()])).toEqual([]);
+  d.scope.core_tasks = ['save', 'resume'];
+  expect(validateDesign(d, brief, decisions(), [spec()])).toContain('Missing core task play');
+});
+
+it('requires confirmation only when deletion is in scope', () => {
+  const d = design(); d.scope.core_tasks = ['Capture and edit notes', 'Browse and reopen notes', 'Archive older notes'];
+  d.pages[0].states = d.pages[0].states.filter((s: any) => !['no_results', 'delete_confirmation'].includes(s.kind));
+  const brief = { max_features: 5, max_navigation: 3, core_tasks: [...d.scope.core_tasks] };
+  expect(validateDesign(d, brief, decisions(), [])).toEqual([]);
+  d.pages[0].states = d.pages[0].states.filter((s: any) => s.kind !== 'unsaved_changes');
+  expect(validateDesign(d, brief, decisions(), [])).toContain('Missing design state unsaved_changes');
+  brief.core_tasks.push('Delete notes'); d.scope.core_tasks.push('Delete notes');
+  expect(validateDesign(d, brief, decisions(), [])).toContain('Missing design state delete_confirmation');
+});
+
+it('rejects invalid and low-contrast palettes before handing a design to the workspace', () => {
+  const d = design(), brief = { max_features: 5, max_navigation: 3, core_tasks: d.scope.core_tasks };
+  d.visual.colors[0].value = '#315DA8 — blue buttons';
+  expect(validateDesign(d, brief, decisions(), []).join()).toContain('Invalid color primary');
+  d.visual.colors[0].value = '#EEEEEE';
+  expect(validateDesign(d, brief, decisions(), [])).toContain('Insufficient contrast primary/onPrimary');
+  d.visual.colors[0].value = '#315DA8';
+  expect(validateDesign(d, brief, decisions(), [])).toEqual([]);
+});
+
+it('renders game palettes and accent controls without inherited notes context', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'game-render-'));
+  const d = design(); d.title = 'Puzzle Harbor';
+  d.visual.colors = [{ role: 'Light background', value: '#F7F8FA' }, { role: 'Light text', value: '#18212B' }, { role: 'Light primary and focus', value: '#2357C6' }, { role: 'Light on-primary', value: '#FFFFFF' }];
+  await renderDesign(dir, d);
+  const html = await readFile(path.join(dir, 'wireframes.html'), 'utf8');
+  expect(html).toContain('--accent:#2357C6');
+  expect(html).not.toContain('normal · Notes');
+  expect(controls({ design: d, brief: {}, decisions: { selections: [] } } as any).find(control => control.id === 'primary-color')?.value).toBe('#2357C6');
 });

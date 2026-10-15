@@ -144,8 +144,9 @@ export function selectedErrors(plan: ChangePlanT, selected: string[], base: Revi
 }
 export function controls(data: RevisionDataT) {
   const chosen = Object.fromEntries(data.decisions.selections.map(s => [s.conflict_id, s.option_id]));
+  const primary = data.design.visual.colors.find(c => /^primary$/i.test(c.role)) || data.design.visual.colors.find(c => /light/i.test(c.role) && /primary|accent/i.test(c.role) && !/on[-_ ]?primary/i.test(c.role)) || data.design.visual.colors.find(c => /primary|accent/i.test(c.role) && !/on[-_ ]?primary/i.test(c.role));
   const result = [
-    { id: 'primary-color', label: '主色', type: 'color', value: data.design.visual.colors.find(c => c.role === 'primary')?.value || '#315DA8', options: [] },
+    { id: 'primary-color', label: '主色', type: 'color', value: primary?.value || '#315DA8', options: [] },
     { id: 'save-mode', label: '保存方式', type: 'select', value: chosen['choice-save'] === 'option-save-explicit' ? 'manual' : 'automatic', options: [{ value: 'automatic', label: '自动保存' }, { value: 'manual', label: '手动保存' }] },
     { id: 'delete-mode', label: '删除方式', type: 'select', value: chosen['choice-delete'] === 'option-delete-permanent' ? 'permanent' : 'recoverable', options: [{ value: 'recoverable', label: '删除后可恢复' }, { value: 'permanent', label: '确认后彻底删除' }] },
     { id: 'editor-content', label: '笔记类型', type: 'select', value: chosen['choice-editor-content'] === 'option-content-checklists' ? 'checklists' : 'text', options: [{ value: 'text', label: '普通文本' }, { value: 'checklists', label: '文本和清单' }] },

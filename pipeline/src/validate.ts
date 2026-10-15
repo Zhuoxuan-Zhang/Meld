@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { paletteErrors } from './palette.js';
+import { DesignPatch, applyDesignPatch } from './design-patch.js';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { AppSpec, Comparison, Decisions, Evidence, UnifiedDesign, Review } from './schemas.js';
@@ -103,7 +105,7 @@ export function validateDecisions(d: any, c: any, specs: any[]) {
 }
 export function validateDesign(d: any, brief: any, decisions: any, specs: any[]) {
   const p = UnifiedDesign.safeParse(d); if (!p.success) return [p.error.message];
-  const errors = sourceErrors(d.features.flatMap((f: any) => f.sources), specs);
+  const errors = [...sourceErrors(d.features.flatMap((f: any) => f.sources), specs), ...paletteErrors(d.visual.colors)];
   if (d.features.length > brief.max_features || !d.features.length) errors.push('Feature scope limit violated');
   if (d.navigation.length > brief.max_navigation) errors.push('Navigation scope limit violated');
   const pages = new Set(d.pages.map((p: any) => p.id)), flows = new Set(d.flows.map((f: any) => f.id));
@@ -137,8 +139,7 @@ export function validateDesign(d: any, brief: any, decisions: any, specs: any[])
   const coreTasks = Array.isArray(brief.core_tasks) ? brief.core_tasks : [];
   if (!coreTasks.length) errors.push('Brief must define core tasks');
   for (const task of coreTasks) if (!d.scope.core_tasks.includes(task)) errors.push(`Missing core task ${task}`);
-  const requiredStates = ['empty', 'error', ...(coreTasks.some((t: string) => /find|search/.test(t)) ? ['no_results'] : []), ...(coreTasks.some((t: string) => /delete|create|edit/.test(t)) ? ['delete_confirmation', 'unsaved_changes'] : [])];
-  for (const kind of requiredStates) if (!d.pages.some((p: any) => p.states.some((s: any) => s.kind === kind))) errors.push(`Missing design state ${kind}`);
+  for (const kind of (brief.required_states || ['empty', 'error', ...(coreTasks.some((t: string) => /find|search/i.test(t)) ? ['no_results'] : []), ...(coreTasks.some((t: string) => /delete/i.test(t)) ? ['delete_confirmation'] : []), ...(coreTasks.some((t: string) => /create|edit|capture/i.test(t)) ? ['unsaved_changes'] : [])])) if (!d.pages.some((p: any) => p.states.some((s: any) => s.kind === kind))) errors.push(`Missing design state ${kind}`);
   for (const s of decisions.selections) if (!d.decisions.includes(s.option_id)) errors.push(`Design omits decision ${s.option_id}`);
   for (const id of d.decisions) if (!decisions.selections.some((s: any) => s.option_id === id)) errors.push(`Unknown design decision ${id}`);
   for (const e of d.entities) { unique(e.fields.map((f: any) => f.name), `entity fields ${e.id}`, errors); if (!e.persistence) errors.push(`Missing persistence ${e.id}`); }
@@ -187,6 +188,14 @@ export async function validateRun(run: string) {
         if(part.sha256!==await fileSha(path.join(run,'calls',part.id,'parsed.json'))) errors.push(`Design fragment changed ${part.id}`);
         if(!state.calls.some((c:any)=>c.id===part.id&&c.success&&/^design-(core|pages|contracts)-/.test(c.stage))) errors.push(`Unverified design fragment call ${part.id}`);
         joined={...joined,...await json(path.join(run,'calls',part.id,'parsed.json'))};
+      }
+      if (!isDeepStrictEqual(assembly.patch_calls || [], (assembly.parsed_patch_sha256 || []).map((part: any) => part.id))) errors.push('Design repair provenance is incomplete');
+      for (const part of assembly.parsed_patch_sha256 || []) {
+        try {
+          if (part.sha256 !== await fileSha(path.join(run, 'calls', part.id, 'parsed.json'))) errors.push(`Design repair changed ${part.id}`);
+          if (!state.calls.some((c: any) => c.id === part.id && c.success && c.stage.startsWith('design-corrections-'))) errors.push(`Unverified design repair call ${part.id}`);
+          joined = applyDesignPatch(joined, DesignPatch.parse(await json(path.join(run, 'calls', part.id, 'parsed.json'))));
+        } catch (error) { errors.push(`Invalid design repair ${part.id}: ${String(error)}`); }
       }
       if(!isDeepStrictEqual(joined,design)) errors.push('Final design does not match actual model-generated fragments');
     }

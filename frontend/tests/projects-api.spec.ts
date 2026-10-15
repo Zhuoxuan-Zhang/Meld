@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { write, json, semanticHash } from "../../pipeline/dist/src/integration.js";
+import { mkdir } from "node:fs/promises";
+import { write, json, semanticHash, fileSha } from "../../pipeline/dist/src/integration.js";
 import { ProjectService } from "../../backend/src/projects";
-import { projectServer, idea } from "./project-fixtures";
+import { projectServer, idea, zipApk } from "./project-fixtures";
 import type { ProjectTestServer } from "./project-fixtures";
 import type { Project, Job } from "../../shared/contracts";
 
@@ -11,7 +12,7 @@ async function call<T>(api: ProjectTestServer, suffix: string, body?: unknown, m
   const response = await fetch(api.address + suffix, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); return response.json() as Promise<T>;
 }
-async function wait(api: ProjectTestServer, job: Job) { await expect.poll(async () => (await call<Job>(api, `/api/jobs/${job.id}`)).status).not.toMatch(/^(queued|running)$/); return call<Job>(api, `/api/jobs/${job.id}`); }
+async function wait(api: ProjectTestServer, job: Job) { await expect.poll(async () => (await call<Job>(api, `/api/jobs/${job.id}`)).status, { timeout: 15000 }).not.toMatch(/^(queued|running)$/); return call<Job>(api, `/api/jobs/${job.id}`); }
 const action = (p: Project) => ({ requestKey: randomUUID(), expectedVersion: p.version });
 async function create(api: ProjectTestServer, example = false) { return call<Project>(api, "/api/projects", { requestKey: randomUUID(), brief: idea, ...(example ? { exampleId: "notes" } : {}) }); }
 async function research(api: ProjectTestServer, p: Project) { await wait(api, await call<Job>(api, `/api/projects/${p.id}/research`, action(p))); return call<Project>(api, `/api/projects/${p.id}`); }
@@ -26,14 +27,18 @@ test("server-owned profiles persist, reject stale updates and deduplicate retrie
     const reloaded = new ProjectService(api.options); expect((await reloaded.get(p.id)).brief.name).toBe("Updated");
   } finally { await api.close(); }
 });
-test("one research job retains Top 5 evidence and missing APKs never become an app", async () => {
+test("missing APKs preserve all Top 5 market references and continue to a proposed design", async () => {
   const api = await projectServer({ apks: false });
   try {
     const p = await research(api, await create(api)); expect(p.references.Productivity.apps).toHaveLength(5); expect(p.references.Productivity.scanId).toMatch(/^scan-/);
     const body = action(p), submitted = await call<Job>(api, `/api/projects/${p.id}/design`, body), waiting = await wait(api, submitted);
-    expect(waiting.status).toBe("waiting_inputs"); expect(waiting.missingInputs).toHaveLength(5);
+    expect(waiting.status).toBe("waiting_user"); expect(waiting.missingInputs).toBeUndefined();
+    expect(waiting.progress!.apps.every(app => app.analysis === "skipped")).toBe(true);
     expect((await call<Job>(api, `/api/projects/${p.id}/design`, body)).id).toBe(submitted.id);
-    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull(); expect(api.counts().analysisCalls).toBe(0);
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull(); expect(api.counts().analysisCalls).toBe(1);
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing product choice");
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).design).toBeDefined(); expect((await call<Project>(api, `/api/projects/${p.id}`)).latestBuild).toBeNull();
   } finally { await api.close(); }
 });
 test("initial conflicts require explicit valid user choices before a design exists", async () => {
@@ -49,6 +54,39 @@ test("initial conflicts require explicit valid user choices before a design exis
     p = await call<Project>(api, `/api/projects/${p.id}`); const input: any = await call(api, `/api/projects/${p.id}/build-input`);
     expect(p.needsDesign).toBe(false); expect(input.decisions.chosen_by).toBe("user"); expect(input.developer_design.decisions).toEqual(["option-save-explicit"]);
     expect(api.counts().analysisCalls).toBe(2);
+  } finally { await api.close(); }
+});
+test("failed analysis resumes the same checkpoint and rejects changed profiles", async () => {
+  const api = await projectServer();
+  try {
+    const runner = api.service.pipeline.options.runner!;
+    api.service.pipeline.options.runner = async () => { throw new Error("Temporary analysis failure"); };
+    let p = await research(api, await create(api));
+    const failed = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    expect(failed.status).toBe("failed"); expect(failed.resumable).toBe(true);
+    const checkpoint = (await api.service.storedJob(failed.id)).pipelineJobId;
+    api.service.pipeline.options.runner = runner;
+    const resumed = await wait(api, await call<Job>(api, `/api/jobs/${failed.id}/resume`, {}));
+    expect(resumed.status).toBe("waiting_user"); expect(resumed.id).toBe(failed.id);
+    expect((await api.service.storedJob(failed.id)).pipelineJobId).toBe(checkpoint);
+    api.service.pipeline.options.runner = async () => { throw new Error("Temporary analysis failure"); };
+    p = await research(api, await create(api));
+    const stale = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    p = await call<Project>(api, `/api/projects/${p.id}`);
+    await call(api, `/api/projects/${p.id}`, { expectedVersion: p.version, brief: { ...idea, input: "A different scope" } }, "PATCH");
+    expect((await call<Job>(api, `/api/jobs/${stale.id}`)).resumable).toBe(false);
+    expect((await fetch(api.address + `/api/jobs/${stale.id}/resume`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(409);
+  } finally { await api.close(); }
+});
+test("a failed generator cannot publish an older valid design file", async () => {
+  const api = await projectServer();
+  try {
+    const runner = api.service.pipeline.options.runner!;
+    api.service.pipeline.options.runner = async task => { await runner({ ...task, pauseForDecisions: false }); return 1; };
+    const p = await research(api, await create(api));
+    const job = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    expect(job.status).toBe("failed"); expect(job.error?.message).toContain("another repair pass");
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).designId).toBeNull();
   } finally { await api.close(); }
 });
 test("changes are public proposals, selected confirmation preserves the source and supports restore", async () => {
@@ -119,5 +157,38 @@ test("project API rejects foreign origins, oversized input and fabricated resear
     expect((await fetch(api.address + "/api/projects", { headers: { Origin: "https://foreign.example" } })).status).toBe(403);
     const response = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestKey: randomUUID(), brief: idea, references: {} }) }); expect(response.status).toBe(400); expect((await response.json()).error.code).toBe("invalid_request");
     const huge = await fetch(api.address + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "x".repeat(70000) }) }); expect(huge.status).toBe(413);
+  } finally { await api.close(); }
+});
+
+test("partial APK acquisition automatically continues and preserves its reference set through confirmation (synthetic downloads)", async () => {
+  const calls: string[] = []; let firstFailure = true;
+  const api = await projectServer({ apks: false, acquireApk: async (packageId, file, progress) => {
+    calls.push(packageId); await progress({ status: "running", bytes: 128, totalBytes: 256, source: "Synthetic fixture" });
+    if (firstFailure) { firstFailure = false; throw new Error("Fixture provider has no downloadable APK."); }
+    await mkdir(path.dirname(file), { recursive: true }); zipApk(file); await write(`${file}.provenance.json`, { packageId, sha256: await fileSha(file) });
+    await progress({ status: "completed", bytes: 256 }); return file;
+  } });
+  try {
+    const p = await research(api, await create(api)), started = await call<Job>(api, `/api/projects/${p.id}/design`, action(p)), blocked = await wait(api, started);
+    expect(blocked.status).toBe("waiting_user"); expect(blocked.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
+    expect(blocked.progress!.apps.find(app => app.download.status === "failed")!.download.message).toContain("Fixture provider"); expect(api.counts().analysisCalls).toBe(1); expect(blocked.missingInputs).toBeUndefined();
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing choice");
+    const continued = await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect(continued.status).toBe("succeeded"); expect(calls).toHaveLength(5);
+    expect(continued.progress!.steps.find(step => step.id === "download")!.status).toBe("completed"); expect(continued.progress!.apps.filter(app => app.download.status === "completed")).toHaveLength(4);
+  } finally { await api.close(); }
+});
+
+test("incomplete APK analysis automatically falls back to a market-assisted design without rewriting the static attempt", async () => {
+  const api = await projectServer({ analysisFailure: true });
+  try {
+    const p = await research(api, await create(api)), task = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));
+    expect(task.status).toBe("waiting_user"); expect(api.counts().analysisCalls).toBe(2);
+    const source = await api.service.storedJob(task.id), pipeline = await api.service.pipeline.get(source.pipelineJobId!);
+    expect(pipeline.execution).toBe("market"); expect(task.progress!.apps.every(app => app.analysis === "skipped")).toBe(true);
+    const original = await json(path.join(api.options.pipeline.directory, pipeline.id, "analysis/run.json")); expect(original.status).toBe("partial"); expect(original.error).toContain("incomplete static analysis");
+    const saved = await call<Project>(api, `/api/projects/${p.id}`); if (saved.pendingDecision?.kind !== "merge_choices") throw new Error("Missing choice");
+    await wait(api, await call<Job>(api, `/api/projects/${p.id}/decisions/${saved.pendingDecision.id}/confirm`, { ...action(saved), selections: [{ conflict_id: "choice-save", option_id: "option-save-explicit" }] }));
+    expect((await call<Project>(api, `/api/projects/${p.id}`)).design).toBeDefined(); expect(await json(path.join(api.options.pipeline.directory, pipeline.id, "analysis/run.json"))).toEqual(original);
   } finally { await api.close(); }
 });

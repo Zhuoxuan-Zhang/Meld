@@ -48,13 +48,13 @@ Research can scan two topics; the review suggests features from at most five ran
 | `GET /api/jobs/{jobId}` | Unified progress |
 | `POST /api/jobs/{jobId}/resume` | Recheck reference files and resume analysis |
 
-`brief` includes `input`, `name`, `audience`, `purpose`, `goal`, `style` and `domains`. Only `input` is required when creating it; other fields have defaults. Research can infer an English profile and search topics. `featurePreferences` contains `selections` keyed by reference app ID and `customRequests` as `{id, name, description}`. Public change proposals contain explanations and IDs; compiled patch operations remain internal.
+`brief` includes `input`, `name`, `audience`, `purpose`, `goal`, `style` and `domains`. Only `input` is required when creating it; other fields have defaults. Research can infer an English profile, search topics, category-specific `coreTasks` and applicable `requiredStates`. These optional brief fields also accept explicit product requirements; games are not forced through notes-only tasks. `featurePreferences` contains `selections` keyed by reference app ID and `customRequests` as `{id, name, description}`. Public change proposals contain explanations and IDs; compiled patch operations remain internal.
 
 ## APK analysis and Android builds
 
 Set `MELD_APK_DIR` to standalone `<package.name>.apk` files. Missing files produce resumable `waiting_inputs`; market listings never substitute for static APK evidence. Automatic store APK acquisition is not implemented. Configure pinned REA tools with `npm --prefix pipeline run setup`, or point `MELD_PIPELINE_TOOL_ROOT` at an existing installation.
 
-The new build worker generates Kotlin/Compose implementation and pure-logic JUnit tests from the approved detailed revision, reviews the code, then runs Gradle `assembleDebug`, `testDebugUnitTest` and `lintDebug`. It checks that tests actually ran, validates the APK archive and publishes hashes. Standard Gradle/manifest scaffolding is supplied; application feature code is generated from the design. Each attempt has its own source directory and logs.
+The build worker plans small Kotlin modules and generates each file separately from the approved detailed revision. It runs Gradle `assembleDebug`, `testDebugUnitTest` and `lintDebug`, then reviews the compiled implementation against the design. Repairs update affected files while retaining unchanged modules. Interrupted generation can resume an ordered checkpoint for the same revision and design hash. It checks that tests actually ran, validates the APK archive and publishes hashes. Standard Gradle/manifest scaffolding is supplied; application feature code is generated from the design. Each attempt has its own source directory and logs.
 
 Configure `MELD_ANDROID_SDK` (SDK 35) and `JAVA_HOME` (JDK 17+). The worker produces a **debug APK**. Passing model review and Gradle checks does not establish full runtime behavior; build reports and the UI distinguish device verification. Existing Android source and imported analysis are preserved. A changed design invalidates approval, and an earlier APK is not presented as the current design's result.
 
@@ -79,3 +79,29 @@ API/browser tests use explicit synthetic research, model and build providers. `f
 - The live Android attempt failed implementation review; a subsequent attempt reached the old model timeout. A further retry uses the saved implementation, higher reasoning effort and a longer time allowance. APK compilation and device behavior have **not** been established by these checks. Synthetic build tests validate orchestration, ownership and downloads, not a real generated app.
 
 Current live progress belongs to saved jobs; consult the delivery page and build report rather than treating this verification snapshot as a successful APK result.
+
+See [the three-game run](puzzle-trio-run.md) for the curated 2048, Antimine and LibreSudoku experiment, source-analysis scopes and runtime verification results.
+
+### Market references and feature confirmation
+
+After research, the review page immediately shows up to five distinct live reference apps, ordered by market-signal score (then scanner rank). The order stays fixed while the user selects features. Every available listing feature is shown under its source app, with listing links, score, rating and explicit feature provenance. These are scanner recommendations, not store chart positions; partial results and keyword fallbacks remain labeled.
+
+Users select features, customize their names and behavior, or add free-text features before clicking **Confirm features and generate design**. The frontend saves preferences through `PATCH /api/projects/:id`, then starts `POST /api/projects/:id/design`. A customized listing feature retains its source feature ID and APK preference; its custom request overrides the original wording in the backend's requested features. Research itself never starts design generation. Design conflicts, when present, are resolved within the same review page.
+
+### Best-effort reference acquisition and simple progress
+
+Design jobs check local APKs, then automatically obtain missing references from Aptoide. Acquisition is best effort: unavailable APKs never pause the workflow. Successfully obtained APKs enter the static pipeline; all selected features and all reference listings remain in the design brief. If no APK is available, or static analysis stops before a valid design exists, a separate market-assisted synthesis run continues using store descriptions, user requests and any individually validated, completed APK specifications. Original failed attempts are preserved. Market-assisted designs do not claim static or runtime verification for unavailable references; their provenance and validation are saved separately from APK end-to-end checks.
+
+The browser shows only five stages: **Get reference apps → Review reference apps → Compare features → Merge the design → Write your design document**. No per-app download list, byte counters or retry step appears in the normal flow. `GET /api/jobs/:id` retains per-app diagnostics for development, including `skipped` analysis status. The pipeline freezes its APK input set once analysis begins so a later download cannot change references during conflict confirmation.
+
+`MELD_APK_AUTO_DOWNLOAD=false` disables network acquisition. `MELD_AAPT` selects the manifest inspection executable, defaulting to SDK `build-tools/35.0.0/aapt2`. Downloads retain restricted HTTPS hosts, three-minute timeouts, a 256 MiB limit, source size/MD5 verification, manifest package checks and SHA-256 provenance. Mirror trust labels are not independent publisher signature verification. [Aptoide API documentation](https://ws2.aptoide.com/api/7/app/getMeta?info=1).
+
+### High-level design first
+
+The project API now uses a short high-level design call immediately after feature confirmation. It receives a compact set of reference features and user preferences; it does not wait for APK acquisition, static analysis or developer contracts. The initial generation targets 350–600 words, uses a 3,500-token response validation limit and a three-minute model timeout. The 1–3 minute response window is a product target, not a guaranteed SLA.
+
+`POST /api/projects/:id/design` publishes `highLevelDesign` on the project. Users can directly edit overview, features, journeys, pages and appearance through `PATCH /api/projects/:id/high-level` with an expected project version and base revision. Desktop users double-click document text (or press Enter/F2); touch users tap it. Enter finishes a single-line edit, Ctrl/Cmd+Enter finishes a multiline edit, and Escape cancels the current field. Edits stay local until **Save design edits** creates a version; unsaved edits block approval. Free-text changes use the existing `/changes` endpoint and produce a preview; applying the preview creates a new immutable outline revision. Developer references are empty at this stage and no developer specification is fabricated.
+
+`POST /api/projects/:id/approve-outline` approves the exact saved outline revision. The `detail` job then acquires references, creates the full developer specification constrained by that outline, and automatically starts the Android build. Source-app implementation choices cannot override the approved product outline. Unavailable APKs retain the best-effort market-assisted path. Detailed design and build artifacts keep their own revision/hash, linked back through `highLevelDesign.developerRevision`; edits clear outline approval and require approval of the new version. Legacy detailed-design examples remain supported.
+
+Live high-level check (2026-10-14): Image Studio revision `hl-v0001-78217075160b` was generated in 26.4 seconds by one successful model call. The design was displayed and checked at 1440px and 390px without starting developer generation or a build. The first schema attempt was rejected before generation; its diagnostic response is retained, and the supported schema was verified by a regression test. This is one measured run, not an average or latency guarantee.

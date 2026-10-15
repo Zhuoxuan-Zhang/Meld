@@ -2,22 +2,24 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { DesignService, pipelineRoot, z, fileSha, json, WorkbenchError } from "../../pipeline/dist/src/integration.js";
-import { ProjectService, CreateProject, PatchProject, Action, ChangeAction, ConfirmAction, RestoreAction, BuildAction } from "./projects";
+import { ProjectService, CreateProject, PatchProject, Action, ChangeAction, ConfirmAction, RestoreAction, BuildAction, OutlinePatch } from "./projects";
 import type { ProjectOptions } from "./projects";
 import { SignalsStore } from "./adapters/signals";
 import { marketOptionsFromEnv, createMarketService } from "./adapters/market";
 import { researchRunner } from "./research";
+import { highLevelRunner } from "./high-level";
+import { apkAcquirer } from "./apk-download";
 import { androidBuildRunner } from "./build";
 import { explainConflicts } from "./choices";
 import { readBody, send } from "./http";
 import type { Middleware } from "./http";
 
 export function projectOptionsFromEnv(env: Record<string, string | undefined>, frontendDir: string): ProjectOptions {
-  const cache = path.join(frontendDir, ".meld-cache"), root = path.dirname(frontendDir);
+  const cache = path.join(frontendDir, ".meld-cache"), root = path.dirname(pipelineRoot);
   return { directory: path.join(cache, "workflow"), designs: new DesignService(pipelineRoot, path.join(cache, "designs")), signals: new SignalsStore(path.join(cache, "signals")),
-    pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG) },
-    exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
-    build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android") }) };
+    pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG), acquireApk: env.MELD_APK_AUTO_DOWNLOAD === "false" ? undefined : apkAcquirer({ aapt: env.MELD_AAPT || path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "build-tools/35.0.0/aapt2") }) },
+    highLevel: highLevelRunner, exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
+    build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android"), nativeSmoke: env.MELD_NATIVE_SMOKE_PROJECT && env.MELD_NATIVE_SMOKE_ADB ? { projectId: env.MELD_NATIVE_SMOKE_PROJECT, script: path.join(root, "frontend/tests/puzzle-native-smoke.py"), adb: env.MELD_NATIVE_SMOKE_ADB, serial: env.MELD_NATIVE_SMOKE_SERIAL || "emulator-5580", output: path.join(frontendDir, "qa-screenshots/puzzle-harbor") } : undefined }) };
 }
 export function projectsMiddleware(service: ProjectService, availability?: () => Promise<Record<string, unknown>>): Middleware {
   let recovering: Promise<void> | undefined;
@@ -46,6 +48,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
         if (parts[2] === "design") return send(response, 202, await service.design(id, Action.parse(input)));
         if (parts[2] === "changes") return send(response, 202, await service.change(id, ChangeAction.parse(input)));
         if (parts[2] === "restore") return send(response, 202, await service.restore(id, RestoreAction.parse(input)));
+        if (parts[2] === "approve-outline") return send(response, 202, await service.detail(id, BuildAction.parse(input)));
         if (parts[2] === "builds") return send(response, 202, await service.build(id, BuildAction.parse(input)));
       }
       if (parts.length === 5 && parts[2] === "decisions" && request.method === "POST") {
@@ -55,6 +58,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
       }
       const project = await service.raw(id);
       if (parts.length === 3 && parts[2] === "build-input" && request.method === "GET") return send(response, 200, await service.buildInput(id, url.searchParams.get("revision") || undefined));
+      if (parts.length === 3 && parts[2] === "high-level" && request.method === "PATCH") return send(response, 200, await service.patchOutline(id, OutlinePatch.parse(await readBody(request))));
       if (parts.length === 3 && parts[2] === "revisions" && request.method === "GET") return send(response, 200, { revisions: await service.revisions(id) });
       if (parts.length === 4 && parts[2] === "references" && request.method === "GET" && project.designId) {
         const ref = z.object({ kind: z.enum(["feature", "page", "flow", "entity", "acceptance", "decision", "color"]), id: z.string().min(1).max(96) }).parse({ kind: url.searchParams.get("kind"), id: parts[3] });
@@ -85,5 +89,5 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
 }
 export function defaultAvailability(env: Record<string, string | undefined>, frontendDir: string) {
   const market = createMarketService(marketOptionsFromEnv(env, frontendDir));
-  return async () => ({ researchAvailable: await market.isAvailable(), designAvailable: spawnSync("codex", ["login", "status"], { timeout: 5000, encoding: "utf8" }).status === 0, buildAvailable: Boolean(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT) });
+  return async () => ({ researchAvailable: await market.isAvailable(), designAvailable: spawnSync("codex", ["login", "status"], { timeout: 5000, encoding: "utf8" }).status === 0, buildAvailable: await fs.access(path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "platforms/android-35/android.jar")).then(() => true, () => false) && await fs.access(path.join(env.JAVA_HOME || "", "bin/java")).then(() => true, () => false) });
 }

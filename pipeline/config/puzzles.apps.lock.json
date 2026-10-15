@@ -1,0 +1,36 @@
+[
+  {
+    "name": "2048 Open Fun Game",
+    "repository": "andstatus/game2048",
+    "version": "1.15.1",
+    "version_code": 44,
+    "package_name": "org.andstatus.game2048",
+    "url": "https://f-droid.org/repo/org.andstatus.game2048_44.apk",
+    "filename": "org.andstatus.game2048-v1.15.1.apk",
+    "sha256": "97f74ab6beafc63f8d9d7aa15291983b0f2969b1c44645bdf37af295c377dde5",
+    "hash_source": "Calculated from pinned F-Droid APK bytes; not an independent signature verification",
+    "selection_reason": "Version 1.16.2 heavily obfuscates business classes; 1.15.1 preserves inspectable game-rule classes. Newer failed/interrupted analysis remains saved."
+  },
+  {
+    "name": "Antimine",
+    "repository": "lucasnlm/antimine-android",
+    "version": "17.6.3 F",
+    "version_code": 1706031,
+    "package_name": "dev.lucanlm.antimine",
+    "url": "https://f-droid.org/repo/dev.lucanlm.antimine_1706031.apk",
+    "filename": "dev.lucanlm.antimine.apk",
+    "sha256": "e7b635b6629bc5b0f59c2700a82079386a90f3a04b39e92e0cf0bb090979e974",
+    "hash_source": "Calculated from pinned F-Droid APK bytes; not an independent signature verification"
+  },
+  {
+    "name": "LibreSudoku",
+    "repository": "kaajjo/LibreSudoku",
+    "version": "2.0.2",
+    "version_code": 22,
+    "package_name": "com.kaajjo.libresudoku",
+    "url": "https://f-droid.org/repo/com.kaajjo.libresudoku_22.apk",
+    "filename": "com.kaajjo.libresudoku.apk",
+    "sha256": "1e93d2be2e234cdb2e38c79c539542a72cbe0330a0d1da1eeb0c8ce544e12d57",
+    "hash_source": "Calculated from pinned F-Droid APK bytes; not an independent signature verification"
+  }
+]
