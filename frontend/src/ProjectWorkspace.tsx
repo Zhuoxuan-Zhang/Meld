@@ -74,6 +74,28 @@ export default function ProjectWorkspace() {
     };
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
   }, [pollingJobId, load, pollTick]);
+  useEffect(() => {
+    if (!availability?.backgroundReferencesAvailable || !project || project.needsResearch || !project.needsDesign || project.referencePreparationId || !Object.keys(project.references).length) return;
+    const controller = new AbortController();
+    void api<Project>(`${projectUrl(project.id)}/reference-preparation`, {}, "POST", controller.signal).then(saved => {
+      if (!controller.signal.aborted) setProject(current => current?.id === saved.id && saved.version >= current.version ? saved : current);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [availability?.backgroundReferencesAvailable, project?.id, project?.needsResearch, project?.needsDesign, project?.referencePreparationId]);
+  useEffect(() => {
+    if (!project?.referencePreparation || !["queued", "running"].includes(project.referencePreparation.status) || pollingJobId) return;
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const current = await api<Project>(projectUrl(project.id), undefined, "GET", controller.signal);
+        if (controller.signal.aborted || projectId.current !== current.id) return;
+        setProject(current);
+        if (["queued", "running"].includes(current.referencePreparation?.status || "")) timer = setTimeout(poll, 2500);
+      } catch { if (!controller.signal.aborted) timer = setTimeout(poll, 5000); }
+    };
+    timer = setTimeout(poll, 1200);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [project?.id, project?.referencePreparation?.id, project?.referencePreparation?.status, pollingJobId]);
   useEffect(() => { if (job?.type === "detail" || job?.type === "build") setStep("app"); }, [job?.id]);
   useEffect(() => {
     setEdits({});
@@ -159,6 +181,8 @@ export default function ProjectWorkspace() {
           {step === "review" && project && <section><p className="studio-eyebrow">MAKE IT YOURS</p><h1>{outline || design ? "Your app, in plain language." : "Choose features from the top reference apps."}</h1><p className="studio-lead">{outline || design ? "Review what it will do, adjust the details, then approve the version you want to build." : "Review the top five apps found from market signals. Choose or customize their features, add your own, then confirm to generate your design document."}</p>
             {busy && <div className="studio-progress" role="status"><Icon name="LoaderCircle" size={21} /><div><strong>{job?.phase || "Working on your app…"}</strong><p>Your project is saved. You can come back to this page.</p></div></div>}
             {job?.progress && <PipelineStatus progress={job.progress} />}
+            {project.referencePreparation && !busy && <div className="studio-reference-preparation" role="status"><Icon name={["queued", "running"].includes(project.referencePreparation.status) ? "LoaderCircle" : "CircleCheck"} size={18} /><div><strong>{["queued", "running"].includes(project.referencePreparation.status) ? "Preparing references in the background" : "Reference preparation finished"}</strong><p>{["queued", "running"].includes(project.referencePreparation.status) ? `${project.referencePreparation.phase} Keep shaping your app while we work.` : "Available reference results will be reused after you approve your design."}</p></div></div>}
+
             {job?.status === "waiting_inputs" && <div className="studio-card studio-waiting"><h2>Continue preparing your design.</h2><p>We can use available references and market information to continue.</p><button className="studio-button secondary" disabled={busy} onClick={() => { void perform(() => startJob(`/api/jobs/${job.id}/resume`, {})); }}>Continue generating design <Icon name="ArrowRight" size={16} /></button></div>}
             {project.needsResearch && !busy && <div className="studio-card"><h2>Start with a little research.</h2><p>We’ll look for relevant apps and useful feature ideas.</p><button className="studio-button primary" onClick={() => { void perform(() => startJob(`${projectUrl(project.id)}/research`, action(project))); }}>Explore ideas <Icon name="ArrowRight" size={16} /></button></div>}
             {!project.needsResearch && project.needsDesign && !outline && !project.activeJobId && <div className="studio-card">

@@ -24,8 +24,8 @@ export type DesignInputValue = z.infer<typeof DesignInput>;
 export type PipelineJob = { id: string; design_id: string; input: DesignInputValue; signature: string;
   status: "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed"; phase: string;
   created_at: string; updated_at: string; reference_apps: { appId: string; title: string; rank: number }[];
-  execution?: "apk" | "market"; progress?: PipelineProgress; missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
-export type PipelineRunner = (request: { run: string; brief: string; market: string; config: string; apks: string[]; pauseForDecisions?: boolean; basis?: "market"; staticRun?: string }) => Promise<number | null>;
+  referenceOnly?: boolean; referenceJobId?: string; execution?: "apk" | "market"; progress?: PipelineProgress; missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
+export type PipelineRunner = (request: { run: string; brief: string; market: string; config: string; apks: string[]; pauseForDecisions?: boolean; analysisOnly?: boolean; basis?: "market"; staticRun?: string }) => Promise<number | null>;
 export type PipelineOptions = { directory: string; apkDir?: string; toolRoot?: string; config?: string; runner?: PipelineRunner; pauseForDecisions?: boolean; acquireApk?: ApkAcquirer };
 
 export function processPipelineRunner(toolRoot?: string): PipelineRunner {
@@ -33,7 +33,7 @@ export function processPipelineRunner(toolRoot?: string): PipelineRunner {
     const output = path.join(path.dirname(input.run), "execution.log");
     const handle = await fs.open(output, "a");
     const command = input.basis === "market" ? ["--run", input.run, "--brief", input.brief, "--market", input.market, "--config", input.config, ...(input.staticRun ? ["--static-run", input.staticRun] : [])] : await exists(path.join(input.run, "run.json")) ? ["resume", "--run", input.run]
-      : ["run", "--run", input.run, "--apks", ...input.apks, "--brief", input.brief, "--config", input.config, "--market-input", input.market, ...(input.pauseForDecisions ? ["--pause-for-decisions"] : [])];
+      : ["run", "--run", input.run, "--apks", ...input.apks, "--brief", input.brief, "--config", input.config, "--market-input", input.market, ...(input.pauseForDecisions ? ["--pause-for-decisions"] : []), ...(input.analysisOnly ? ["--analysis-only"] : [])];
     try {
       return await new Promise<number | null>((resolve, reject) => {
         const child = spawn(process.execPath, ["--import", "tsx", input.basis === "market" ? "src/market-design.ts" : "src/cli.ts", ...command], {
@@ -50,6 +50,7 @@ export function processPipelineRunner(toolRoot?: string): PipelineRunner {
 }
 export class PipelineJobs {
   private tail: Promise<unknown> = Promise.resolve();
+  private referenceTail: Promise<unknown> = Promise.resolve();
   constructor(readonly service: DesignService, readonly signals: SignalsStore, readonly options: PipelineOptions) {}
   file(id: string) {
     if (!/^pipeline-[a-f\d-]{36}$/.test(id)) throw new WorkbenchError("invalid_job", "Invalid pipeline job.");
@@ -59,7 +60,7 @@ export class PipelineJobs {
     try {
       const job: PipelineJob = await json(this.file(id));
       const run = path.join(this.options.directory, id, job.execution === "market" ? "market-design" : "analysis");
-      if (job.progress && await exists(path.join(run, "run.json"))) {
+      if (job.progress && !(job.referenceOnly && ["succeeded", "failed"].includes(job.status)) && await exists(path.join(run, "run.json"))) {
         const state = await json(path.join(run, "run.json")), locks = await exists(path.join(run, "apps.lock.json")) ? await json(path.join(run, "apps.lock.json")) : [];
         const stages = state.stages || {}, active = state.active_stage;
         job.progress.modelCalls = state.calls?.length || 0;
@@ -76,6 +77,7 @@ export class PipelineJobs {
         }
         if (job.status === "running" && !["document", "complete"].includes(job.progress.stage)) job.phase = phase === "analysis" ? "Analyzing reference apps…" : phase === "compare" ? "Comparing reference features and identifying conflicts…" : state.calls?.at(-1)?.stage?.startsWith("design-text-repair") ? "Refining your detailed design…" : state.calls?.at(-1)?.stage?.startsWith("design-text-review") ? "Checking your detailed design…" : "Merging your selected features into a detailed design…";
       }
+      if (job.referenceOnly && job.progress) job.progress.steps = job.progress.steps.filter(step => ["download", "analysis"].includes(step.id));
       if (job.status === "failed" && job.progress) {
         const current = job.progress.steps.find(step => step.id === job.progress!.stage);
         if (current) current.status = "failed";
@@ -89,13 +91,17 @@ export class PipelineJobs {
       if (!/^pipeline-[a-f\d-]{36}\.json$/.test(file)) continue;
       const job = await this.get(file.slice(0, -5));
       if (!["queued", "running"].includes(job.status)) continue;
+      if (job.referenceOnly) {
+        const market = await json(path.join(this.options.directory, job.id, "market.json"));
+        job.status = "queued"; this.enqueue(job, market.scans, market.reference_apps || market.apps); continue;
+      }
       if (await exists(path.join(this.service.store.directory(job.design_id), "manifest.json"))) {
         job.result = await this.service.get(job.design_id); job.status = "succeeded"; job.phase = "Your design is ready.";
       } else { job.status = "failed"; job.error = { code: "interrupted", message: "The design request was interrupted. Your choices are saved; retry to continue." }; }
       job.updated_at = new Date().toISOString(); await write(this.file(job.id), job);
     }
   }
-  async submit(input: DesignInputValue) {
+  async submit(input: DesignInputValue, preparation?: { referenceOnly?: boolean; referenceJobId?: string }) {
     const scans = await Promise.all(input.scan_ids.map(id => this.signals.read(id)));
     if (new Set(input.scan_ids).size !== input.scan_ids.length) throw new WorkbenchError("invalid_input", "Choose each scan only once.");
     const all = new Map<string, MarketApp>();
@@ -115,13 +121,13 @@ export class PipelineJobs {
     if (!apps.length) throw new WorkbenchError("missing_signals", "Collect reference apps before creating a design.");
     return withLock(path.join(this.options.directory, "submit.lock"), async () => {
       const indexFile = path.join(this.options.directory, "index.json"); const index = await exists(indexFile) ? await json(indexFile) : {};
-      const signature = semanticHash(input);
+      const signature = semanticHash(preparation ? { input, preparation } : input);
       if (Object.hasOwn(index, input.request_key)) {
         if (index[input.request_key].signature !== signature) throw new WorkbenchError("idempotency_conflict", "This request ID was used for different choices.", 409);
         return this.get(index[input.request_key].id);
       }
-      const job: PipelineJob = { id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature,
-        status: "queued", phase: "Preparing your reference apps…", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), reference_apps: apps.map(a => ({ appId: a.appId, title: a.title, rank: a.rank })) };
+      const job: PipelineJob = { id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature, ...preparation,
+        status: "queued", phase: preparation?.referenceJobId ? "Finishing background reference analysis…" : "Preparing your reference apps…", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), reference_apps: apps.map(a => ({ appId: a.appId, title: a.title, rank: a.rank })) };
       await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, preferences: input.preferences, feature_requests: input.feature_requests, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices and descriptions are preferences, not REA findings."] });
       index[input.request_key] = { signature, id: job.id }; await write(indexFile, index);
       this.enqueue(job, scans, apps); return job;
@@ -157,7 +163,8 @@ export class PipelineJobs {
     await write(file, decisions); return this.resume(id);
   }
   private enqueue(job: PipelineJob, scans: MarketResult[], apps: MarketApp[]) {
-    this.tail = this.tail.then(() => this.run(job, scans, apps)).catch(() => undefined);
+    if (job.referenceOnly) this.referenceTail = this.referenceTail.then(() => this.run(job, scans, apps)).catch(() => undefined);
+    else this.tail = this.tail.then(() => this.run(job, scans, apps)).catch(() => undefined);
   }
   private async run(job: PipelineJob, scans: MarketResult[], apps: MarketApp[]) {
     job.status = "running"; job.phase = "Checking reference files…"; delete job.missing_apps; await write(this.file(job.id), job);
@@ -165,15 +172,29 @@ export class PipelineJobs {
       const missing: string[] = [], apks: string[] = [], locks: { appId: string; apk_sha256: string }[] = [];
       job.progress = { stage: "download", apps: apps.map(app => ({ appId: app.appId, title: app.title, download: { status: "pending", bytes: 0 }, analysis: "pending" })), steps: [{ id: "download", label: "Get reference apps", status: "running" }, { id: "analysis", label: "Review reference apps", status: "pending" }, { id: "compare", label: "Compare features", status: "pending" }, { id: "merge", label: "Merge the design", status: "pending" }, { id: "document", label: "Write your design document", status: "pending" }] };
       const savedMarket = await json(path.join(this.options.directory, job.id, "market.json"));
+      let prepared = job.referenceJobId ? await this.get(job.referenceJobId) : null;
+      while (prepared && ["queued", "running"].includes(prepared.status)) {
+        job.phase = `Finishing background reference preparation: ${prepared.phase}`;
+        if (prepared.progress) {
+          job.progress.apps = prepared.progress.apps;
+          for (const step of job.progress.steps) { const background = prepared.progress.steps.find(value => value.id === step.id); if (background) step.status = background.status; }
+        }
+        job.updated_at = new Date().toISOString(); await write(this.file(job.id), job);
+        await new Promise(resolve => setTimeout(resolve, 600)); prepared = await this.get(job.referenceJobId!);
+      }
+      if (prepared && (!prepared.referenceOnly || !["succeeded", "failed"].includes(prepared.status) || semanticHash([...prepared.input.scan_ids].sort()) !== semanticHash([...job.input.scan_ids].sort()) || semanticHash(prepared.reference_apps.map(app => app.appId).sort()) !== semanticHash(apps.map(app => app.appId).sort()))) throw new WorkbenchError("stale_references", "Reference research changed. Start a new design request.", 409);
+      const preparedDirectory = prepared ? path.join(this.options.directory, prepared.id) : null;
+      const preparedMarket = preparedDirectory ? await json(path.join(preparedDirectory, "market.json")) : null;
+
       const frozenInputs = job.execution && (await exists(path.join(this.options.directory, job.id, "analysis/run.json")) || await exists(path.join(this.options.directory, job.id, "market-design/run.json"))) ? new Set(savedMarket.apps.map((app: MarketApp) => app.appId)) : null;
       const persist = async () => { job.updated_at = new Date().toISOString(); await write(this.file(job.id), job); };
       for (const app of apps) {
         const entry = job.progress.apps.find(value => value.appId === app.appId)!;
         if (frozenInputs && !frozenInputs.has(app.appId)) { missing.push(app.appId); entry.download = { status: "failed", bytes: 0, message: "Using saved store signals for this reference." }; continue; }
-        const local = this.options.apkDir && path.join(this.options.apkDir, `${app.appId}.apk`), cached = path.join(this.options.directory, job.id, "apks", `${app.appId}.apk`);
+        const local = this.options.apkDir && path.join(this.options.apkDir, `${app.appId}.apk`), cached = path.join(preparedDirectory || path.join(this.options.directory, job.id), "apks", `${app.appId}.apk`);
         let file = local && await exists(local) ? local : await exists(cached) ? cached : undefined;
         job.phase = "Getting reference apps…"; await persist();
-        if (!file && this.options.acquireApk) {
+        if (!file && !prepared && this.options.acquireApk) {
           try { file = await this.options.acquireApk(app.appId, cached, async state => { entry.download = state; await persist(); }); }
           catch (error) { entry.download.status = "failed"; entry.download.message = (error as Error).message; }
         }
@@ -182,6 +203,7 @@ export class PipelineJobs {
           if ((await fs.lstat(file)).isSymbolicLink()) throw new Error("Reference APK symlinks are not supported.");
           await checkApk(file, path.join(this.options.directory, job.id, `${app.appId}-check.json`));
           const digest = await fileSha(file);
+          if (preparedMarket && preparedMarket.apps.find((value: MarketApp) => value.appId === app.appId)?.apk_sha256 !== digest) throw new Error("Prepared reference APK changed; preserve the saved analysis and refresh reference research.");
           if (file === cached) { const provenance = await json(`${cached}.provenance.json`); if (provenance.packageId !== app.appId || provenance.sha256 !== digest) throw new Error("Cached APK changed; remove it and retry acquisition."); }
           apks.push(file); locks.push({ appId: app.appId, apk_sha256: digest });
           entry.download = { ...entry.download, status: "completed", bytes: (await fs.stat(file)).size, message: "APK ready for static analysis." }; await persist();
@@ -213,13 +235,20 @@ export class PipelineJobs {
       job.phase = "Analyzing reference apps…"; await write(this.file(job.id), job);
       // An interrupted run resumes in-place with the engine's fingerprint checks.
       const runner = this.options.runner || processPipelineRunner(this.options.toolRoot);
-      if (apks.length && job.execution !== "market") {
+      if (apks.length && !prepared && job.execution !== "market") {
         job.execution = "apk"; await persist();
-        job.cli_exit_code = await runner({ run, apks, brief: path.join(directory, "brief.json"), market: path.join(directory, "market.json"), config, pauseForDecisions: job.input.approved_outline ? false : this.options.pauseForDecisions });
+        job.cli_exit_code = await runner({ run, apks, brief: path.join(directory, "brief.json"), market: path.join(directory, "market.json"), config, pauseForDecisions: job.referenceOnly || job.input.approved_outline ? false : this.options.pauseForDecisions, analysisOnly: job.referenceOnly });
+      }
+      if (job.referenceOnly) {
+        const sourceState = await exists(path.join(run, "run.json")) ? await json(path.join(run, "run.json")) : null;
+        const sourceLocks = await exists(path.join(run, "apps.lock.json")) ? await json(path.join(run, "apps.lock.json")) : [];
+        for (const app of job.progress.apps) { const lock = sourceLocks.find((value: any) => value.package_name === app.appId); app.analysis = lock && sourceState?.stages?.[`analyze-${lock.id}`] ? "completed" : app.download.status === "completed" ? "failed" : "skipped"; }
+        job.status = "succeeded"; job.phase = "Reference preparation finished. Available analysis is saved.";
+        job.progress.stage = "complete"; job.progress.steps = job.progress.steps.filter(step => ["download", "analysis"].includes(step.id)); job.progress.steps.forEach(step => { step.status = "completed"; }); return;
       }
       const apkWaiting = await exists(path.join(run, "run.json")) && (await json(path.join(run, "run.json"))).status === "waiting_user";
-      if (job.execution === "market" || !apks.length || !apkWaiting && !(await exists(path.join(run, "final/final-design.json")))) {
-        const staticRun = run; run = path.join(directory, "market-design"); job.execution = "market";
+      if (prepared || job.execution === "market" || !apks.length || !apkWaiting && !(await exists(path.join(run, "final/final-design.json")))) {
+        const staticRun = preparedDirectory ? path.join(preparedDirectory, "analysis") : run; run = path.join(directory, "market-design"); job.execution = "market";
         const sourceState = await exists(path.join(staticRun, "run.json")) ? await json(path.join(staticRun, "run.json")) : null;
         const sourceLocks = await exists(path.join(staticRun, "apps.lock.json")) ? await json(path.join(staticRun, "apps.lock.json")) : [];
         for (const app of job.progress.apps) { const lock = sourceLocks.find((value: any) => value.package_name === app.appId); app.analysis = lock && sourceState?.stages?.[`analyze-${lock.id}`] ? "completed" : "skipped"; }
@@ -254,5 +283,5 @@ export class PipelineJobs {
       if (job.progress) { const step = job.progress.steps.find(step => step.id === job.progress!.stage); if (step) step.status = "failed"; }
     } finally { job.updated_at = new Date().toISOString(); await write(this.file(job.id), job); }
   }
-  async idle() { await this.tail; }
+  async idle() { await Promise.all([this.tail, this.referenceTail]); }
 }

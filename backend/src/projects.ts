@@ -25,7 +25,7 @@ export const BuildAction = Action.extend({ revision: key });
 type StoredJob = Job & { projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
-export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
+export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; prepareReferences?: boolean; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
 const publicProposal = (proposal: Awaited<ReturnType<DesignService["createProposal"]>>): ChangeProposal => ({ id: proposal.id, base_revision: proposal.base_revision, request_text: proposal.request_text, plan: { ...proposal.plan, changes: proposal.plan.changes.map(({ operations: _operations, ...change }) => change) } });
 const publicDesign = (view: Awaited<ReturnType<DesignService["get"]>>, projectId: string) => ({ ...view, artifacts: view.artifacts.map(artifact => ({ ...artifact, url: `/api/projects/${projectId}/artifacts/${view.revision}/${encodeURIComponent(artifact.name)}` })) });
 
@@ -46,6 +46,10 @@ export class ProjectService {
   }
   async get(id: string): Promise<Project> {
     const project = await this.raw(id);
+    if (project.referencePreparationId) {
+      const preparation = await this.pipeline.get(project.referencePreparationId);
+      project.referencePreparation = { id: preparation.id, status: preparation.status, phase: preparation.phase, progress: preparation.progress };
+    }
     if (project.designId && project.currentDesignRevision) project.design = publicDesign(await this.options.designs.get(project.designId, project.currentDesignRevision), id);
     if (project.design && project.latestBuild?.status === "succeeded" && project.latestBuild.revision === project.currentDesignRevision && !project.needsDesign) {
       project.design.implementation = { status: "in_sync", revision: project.currentDesignRevision, app_name: project.brief.name };
@@ -117,7 +121,7 @@ export class ProjectService {
         project.featurePreferences = input.featurePreferences; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       if (input.brief) {
-        if (semanticHash(project.brief.domains) !== semanticHash(input.brief.domains) || project.brief.input !== input.brief.input) { project.needsResearch = true; project.references = {}; project.featurePreferences.selections = {}; }
+        if (semanticHash(project.brief.domains) !== semanticHash(input.brief.domains) || project.brief.input !== input.brief.input) { project.needsResearch = true; project.references = {}; delete project.referencePreparationId; delete project.referencePreparation; project.featurePreferences.selections = {}; }
         project.brief = input.brief; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       project.version++; project.needsDesign = true; project.approvedRevision = null; project.pendingDecision = null; project.activeJobId = null;
@@ -129,7 +133,7 @@ export class ProjectService {
   async saveJob(job: StoredJob) { job.updatedAt = new Date().toISOString(); await write(this.jobFile(job.id), job); }
   async job(id: string): Promise<Job> { const stored = await this.storedJob(id); if (stored.pipelineJobId && !["succeeded", "failed"].includes(stored.status)) { const current = await this.pipeline.get(stored.pipelineJobId); stored.progress = current.progress; stored.phase = current.phase; } const { request: _request, signature: _signature, projectVersion: _version, pipelineJobId: _pipeline, internalJobId: _internal, ...job } = stored; return job; }
   launch(work: () => Promise<void>) { const task = Promise.resolve().then(work); this.tasks.add(task); void task.finally(() => this.tasks.delete(task)).catch(() => undefined); }
-  async idle() { while (this.tasks.size) await Promise.allSettled([...this.tasks]); }
+  async idle() { while (this.tasks.size) await Promise.allSettled([...this.tasks]); await this.pipeline.idle(); }
   async start(id: string, type: Job["type"], input: z.infer<typeof Action> & Record<string, unknown>, work: (job: StoredJob) => Promise<void>) {
     const file = path.join(this.options.directory, "job-index.json");
     return withLock(`${file}.lock`, async () => {
@@ -170,8 +174,25 @@ export class ProjectService {
       const references: Record<string, MarketResult> = {};
       for (const scan of result.references) references[scan.domain] = await this.options.signals.record(scan);
       if (!Object.values(references).some(scan => scan.apps.length)) throw new WorkbenchError("no_references", "No reference apps matched. Try a broader description.", 422);
-      await this.finish(job, p => { p.brief = result.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.approvedRevision = null; p.pendingDecision = null; p.featurePreferences.selections = {}; });
+      await this.finish(job, async p => {
+        p.brief = result.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.approvedRevision = null; p.pendingDecision = null; p.featurePreferences.selections = {}; delete p.referencePreparationId; delete p.referencePreparation;
+        if (this.options.prepareReferences) await this.prepareReferencesFor(p);
+      });
     });
+  }
+  async prepareReferencesFor(project: Project) {
+    if (project.referencePreparationId) return;
+    const scans = Object.values(project.references).map(scan => scan.scanId);
+    const preparation = await this.pipeline.submit(DesignInput.parse({ request_key: `references-${project.id}-${semanticHash(scans).slice(0, 12)}`, scan_ids: scans, brief: { name: "Reference research", audience: "Source-app analysis", purpose: "Inspect representative local behavior from the reference listings. Do not design a new application.", goal: "Collect static reference evidence", style: "warm", coreTasks: ["reference_behavior"] }, preferences: [], requested_features: [], feature_requests: [] }), { referenceOnly: true });
+    project.referencePreparationId = preparation.id;
+  }
+  async prepareReferences(id: string) {
+    if (!this.options.prepareReferences) throw new WorkbenchError("preparation_unavailable", "Background reference preparation is disabled.", 503);
+    await this.mutate(id, async project => {
+      if (project.needsResearch || !Object.values(project.references).some(scan => scan.apps.length)) throw new WorkbenchError("research_required", "Collect reference apps first.", 409);
+      await this.prepareReferencesFor(project);
+    });
+    return this.get(id);
   }
   async saveOutline(project: Project, document: unknown) {
     const parsed = HighLevelDocument.parse(document), version = (project.highLevelVersion || project.highLevelDesign?.version || 0) + 1;
@@ -219,7 +240,7 @@ export class ProjectService {
       const approvedFeatures = approved?.features.map(feature => ({ id: feature.id, name: feature.title, description: feature.summary })) || [];
       const featureRequests = [...new Map([...chosen, ...project.featurePreferences.customRequests, ...approvedFeatures].map(feature => [feature.id, feature])).values()];
       const pipeline = await this.pipeline.submit(DesignInput.parse({ request_key: job.id, scan_ids: Object.values(project.references).map(scan => scan.scanId), brief: { name: project.brief.name || "My app", audience: project.brief.audience, purpose: project.brief.purpose || project.brief.input.slice(0, 600), goal: project.brief.goal, style: project.brief.style, coreTasks: project.brief.coreTasks, requiredStates: project.brief.requiredStates },
-        preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: (approved ? approvedFeatures : featureRequests).map(f => f.id), feature_requests: featureRequests, ...(approvedOutline ? { approved_outline: approvedOutline } : {}) }));
+        preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: (approved ? approvedFeatures : featureRequests).map(f => f.id), feature_requests: featureRequests, ...(approvedOutline ? { approved_outline: approvedOutline } : {}) }), project.referencePreparationId ? { referenceJobId: project.referencePreparationId } : undefined);
       job.pipelineJobId = pipeline.id; await this.saveJob(job); await this.watchPipeline(job);
   }
   async watchPipeline(job: StoredJob) {

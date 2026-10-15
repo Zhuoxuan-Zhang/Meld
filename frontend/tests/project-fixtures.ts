@@ -33,7 +33,7 @@ export class ProjectModel extends FixtureModel {
 export async function notebookFixture(dir: string) {
   const data = await sourceFixture(dir); data.design.title = "Pocket Notes"; data.design.features[0].title = "Write notes"; await write(path.join(dir, "final/final-design.json"), data.design); return data;
 }
-export async function projectServer({ apks = true, buildFailure = false, listedFeatures = false, acquireApk, analysisFailure = false, highLevel }: { apks?: boolean; buildFailure?: boolean; listedFeatures?: boolean; acquireApk?: ApkAcquirer; analysisFailure?: boolean; highLevel?: HighLevelRunner } = {}) {
+export async function projectServer({ apks = true, buildFailure = false, listedFeatures = false, acquireApk, analysisFailure = false, highLevel, prepareReferences = false }: { apks?: boolean; buildFailure?: boolean; listedFeatures?: boolean; acquireApk?: ApkAcquirer; analysisFailure?: boolean; highLevel?: HighLevelRunner; prepareReferences?: boolean } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "meld-project-test-")), model = new ProjectModel(), designs = new DesignService(pipelineRoot, path.join(root, "designs"), model), signals = new SignalsStore(path.join(root, "signals"));
   await notebookFixture(path.join(root, "example")); await designs.initialize("notes", path.join(root, "example"), {});
   const apkDir = path.join(root, "apks"); if (apks) {
@@ -47,7 +47,7 @@ export async function projectServer({ apks = true, buildFailure = false, listedF
     await write(path.join(input.directory, "artifacts.json"), metadata);
     return { artifacts: metadata, validation: { build: true, unitTests: true, lint: true, runtimeVerified: false, limitations: ["Synthetic worker fixture, not Android compilation or runtime evidence."] } };
   };
-  const options: ProjectOptions = { directory: path.join(root, "workflow"), designs, signals, exampleId: "notes", build, highLevel,
+  const options: ProjectOptions = { directory: path.join(root, "workflow"), designs, signals, exampleId: "notes", build, highLevel, prepareReferences,
     research: async brief => {
       const scan = fromScannerReport("Productivity", scannerReport("Productivity"));
       if (listedFeatures) for (const app of scan.apps) app.listedFeatures = { items: [{ name: "Quick notes", detail: "Capture ideas quickly." }, { name: "Find notes", detail: "Find an existing note." }, { name: "Organize notes", detail: "Keep related notes together." }], model: "synthetic-fixture", template: "fixture", generatedAt: scan.generatedAt };

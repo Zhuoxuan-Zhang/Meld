@@ -18,7 +18,7 @@ export function projectOptionsFromEnv(env: Record<string, string | undefined>, f
   const cache = path.join(frontendDir, ".meld-cache"), root = path.dirname(frontendDir);
   return { directory: path.join(cache, "workflow"), designs: new DesignService(pipelineRoot, path.join(cache, "designs")), signals: new SignalsStore(path.join(cache, "signals")),
     pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG), acquireApk: env.MELD_APK_AUTO_DOWNLOAD === "false" ? undefined : apkAcquirer({ aapt: env.MELD_AAPT || path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "build-tools/35.0.0/aapt2") }) },
-    highLevel: highLevelRunner, exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
+    highLevel: highLevelRunner, prepareReferences: env.MELD_BACKGROUND_REFERENCES !== "false", exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
     build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android"), nativeSmoke: env.MELD_NATIVE_SMOKE_PROJECT && env.MELD_NATIVE_SMOKE_ADB ? { projectId: env.MELD_NATIVE_SMOKE_PROJECT, script: path.join(root, "frontend/tests/puzzle-native-smoke.py"), adb: env.MELD_NATIVE_SMOKE_ADB, serial: env.MELD_NATIVE_SMOKE_SERIAL || "emulator-5580", output: path.join(frontendDir, "qa-screenshots/puzzle-harbor") } : undefined }) };
 }
 export function projectsMiddleware(service: ProjectService, availability?: () => Promise<Record<string, unknown>>): Middleware {
@@ -29,7 +29,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
       if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}`) throw new WorkbenchError("origin_denied", "Use the app from its own browser address.", 403);
       await (recovering ||= service.recover());
       const url = new URL(request.url, `http://${request.headers.host}`), parts = url.pathname.slice(5).split("/").filter(Boolean).map(decodeURIComponent);
-      if (request.method === "GET" && url.pathname === "/api/status") return send(response, 200, { available: true, service: "meld-project-api", exampleId: service.options.exampleId || null, ...(availability ? await availability() : {}) });
+      if (request.method === "GET" && url.pathname === "/api/status") return send(response, 200, { available: true, service: "meld-project-api", backgroundReferencesAvailable: Boolean(service.options.prepareReferences), exampleId: service.options.exampleId || null, ...(availability ? await availability() : {}) });
       if (parts[0] === "jobs" && parts.length === 2 && request.method === "GET") return send(response, 200, await service.job(parts[1]));
       if (parts[0] === "jobs" && parts.length === 3 && parts[2] === "resume" && request.method === "POST") { await readBody(request); return send(response, 202, await service.resume(parts[1])); }
       if (parts[0] !== "projects") throw new WorkbenchError("not_found", "Endpoint not found.", 404);
@@ -44,6 +44,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
       }
       if (parts.length === 3 && request.method === "POST") {
         const input = await readBody(request);
+        if (parts[2] === "reference-preparation") return send(response, 202, await service.prepareReferences(id));
         if (parts[2] === "research") return send(response, 202, await service.research(id, Action.parse(input)));
         if (parts[2] === "design") return send(response, 202, await service.design(id, Action.parse(input)));
         if (parts[2] === "changes") return send(response, 202, await service.change(id, ChangeAction.parse(input)));

@@ -39,6 +39,7 @@ export type Project = {
   references: Record<string, MarketResult>; featurePreferences: { selections: Record<string, string[]>; customRequests: FeatureRequest[] };
   designId: string | null; currentDesignRevision: string | null; approvedRevision: string | null;
   pendingDecision: Decision | null; activeJobId: string | null; latestBuild: Build | null; lastDeliveredBuild?: Build;
+  referencePreparationId?: string; referencePreparation?: { id: string; status: JobStatus; phase: string; progress?: PipelineProgress };
   highLevelVersion?: number; highLevelDesign?: HighLevelDesign; highLevelFeedback?: string; needsResearch: boolean; needsDesign: boolean; design?: DesignView;
   designHistory?: { designId: string; revision: string }[];
 };
