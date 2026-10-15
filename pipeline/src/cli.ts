@@ -29,6 +29,7 @@ function parse(args: string[]) {
     const key = args.shift()!;
     if (key === '--demo') opts.demo = true;
     else if (key === '--pause-for-decisions') opts.pauseForDecisions = true;
+    else if (key === '--analysis-only') opts.analysisOnly = true;
     else if (key === '--apks') { opts.apks = []; while (args[0] && !args[0].startsWith('--')) opts.apks.push(args.shift()); }
     else if (['--brief', '--run', '--config', '--market-input'].includes(key)) { if (!args[0] || args[0].startsWith('--')) throw new Error(`Missing value ${key}`); opts[key.slice(2)] = args.shift(); }
     else throw new Error(`Unknown argument ${key}`);
@@ -65,7 +66,7 @@ async function execute() {
     const brief = Brief.parse(await json(path.resolve(opts.brief || path.join(root, 'config/brief.notes.json'))));
     await fs.mkdir(run, { recursive: true });
     state = { id: path.basename(run), created_at: new Date().toISOString(), status: 'initializing', config: cfg, stages: {}, calls: [], mode: opts.demo ? 'demo' : 'user_apks', input_plan: opts.demo ? await json(path.join(root, 'config/demo.apps.lock.json')) : opts.apks.map((p: string, i: number) => ({ id: `app${i+1}`, input_source: path.resolve(p), url: '', version: '', package_name: '' })) };
-    state.human_decisions = Boolean(opts.pauseForDecisions);
+    state.human_decisions = Boolean(opts.pauseForDecisions); state.analysis_only = Boolean(opts.analysisOnly);
     if (opts['market-input']) {
       const input = await json(path.resolve(opts['market-input']));
       if (!Array.isArray(input.apps) || input.apps.length !== state.input_plan.length || input.apps.some((a: any) => !/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(a.appId))) throw new Error('Market handoff must match every selected APK');
@@ -133,12 +134,20 @@ async function execute() {
     for (const app of apps) {
       app.path = path.join(run, 'apps', app.id, 'input.apk');
       const output = `apps/${app.id}/app-spec.json`, ev = `apps/${app.id}/evidence.json`;
-      await stage(run, state, `analyze-${app.id}`, [output, ev, `apps/${app.id}/review.json`, `apps/${app.id}/app-spec.md`], async () => { const scoped = brief.reference_scopes?.[app.package_name];
-        const { required_states: _targetStates, ...sourceBrief } = brief;
-        await analyze(root, run, app, rea!, claude, scoped ? { ...sourceBrief, core_tasks: scoped.core_tasks, scope: scoped.scope, analysis_role: 'Reference method behavior only. Target screen states, target persistence guarantees and other game modes are not source-completeness requirements. Keep unconfirmed caller wiring and initialization as explicit unknowns.' } : brief, state.config); }, async () => [...validateSpecData(await json(path.join(run, output)), await json(path.join(run, ev)), app), ...await validateEvidence(run, await json(path.join(run, ev)))]);
-      specs.push(await json(path.join(run, output)));
+      try {
+        await stage(run, state, `analyze-${app.id}`, [output, ev, `apps/${app.id}/review.json`, `apps/${app.id}/app-spec.md`], async () => { const scoped = brief.reference_scopes?.[app.package_name];
+          const { required_states: _targetStates, ...sourceBrief } = brief;
+          await analyze(root, run, app, rea!, claude, scoped ? { ...sourceBrief, core_tasks: scoped.core_tasks, scope: scoped.scope, analysis_role: 'Reference method behavior only. Target screen states, target persistence guarantees and other game modes are not source-completeness requirements. Keep unconfirmed caller wiring and initialization as explicit unknowns.' } : brief, state.config); }, async () => [...validateSpecData(await json(path.join(run, output)), await json(path.join(run, ev)), app), ...await validateEvidence(run, await json(path.join(run, ev)))]);
+        specs.push(await json(path.join(run, output)));
+      } catch (error) {
+        if (!state.analysis_only) throw error;
+        state.analysis_failures ||= [];
+        state.analysis_failures.push({ app_id: app.id, at: new Date().toISOString(), error: redact(String(error)) });
+        await write(path.join(run, 'run.json'), state);
+      }
     }
     await write(path.join(run, 'validation/static-tools.json'), { passed: true, apps: apps.map((a: any) => ({ app_id: a.id, package_name: a.package_name, sha256: a.sha256 })), tools: [...rea.schemas.keys()], rea_revision: fp.tools.lock.rea_commit, limitations: ['Static tools only; upstream verify:android bootstrap failure is separately logged, not counted as passed.'] });
+    if (state.analysis_only) { state.status = state.analysis_failures?.length ? 'ANALYSIS_PARTIAL' : 'ANALYSIS_PASSED'; state.error = ''; await report(run, state); return; }
     if (await synthesize(run, state, claude, brief, specs) === 'waiting_user') {
       state.status = 'waiting_user'; state.error = ''; await report(run, state); console.log('Waiting for recorded user conflict choices.'); return;
     }

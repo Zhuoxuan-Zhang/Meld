@@ -1,8 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { write, fileSha } from "../../pipeline/dist/src/integration.js";
+import { mkdir } from "node:fs/promises";
 import { HighLevelDocument } from "../../backend/src/high-level";
 import { z } from "../../pipeline/dist/src/integration.js";
-import { projectServer, idea } from "./project-fixtures";
+import { projectServer, idea, zipApk } from "./project-fixtures";
 import type { ProjectTestServer } from "./project-fixtures";
 import type { Project, Job, UserDocument } from "../../shared/contracts";
 const document: UserDocument = { language: "en", title: "Pocket Notes", summary: "Capture and find your ideas on your phone.", audience: "People keeping personal notes", features: [{ id: "feature-write", title: "Quick notes", summary: "Write and save notes offline.", steps: ["Open a new note", "Write and save"], examples: [], caveats: [], refs: [] }], screens: [{ id: "page-home", title: "Home", purpose: "Find and open notes.", refs: [] }], choices: [], appearance: "Calm green accents on a light background.", boundaries: ["Offline personal use" ] };
@@ -67,4 +70,86 @@ test("high-level structured output uses a supported reference schema while rejec
   const schema = z.toJSONSchema(HighLevelDocument);
   expect(JSON.stringify(schema)).not.toContain('"not":');
   expect(HighLevelDocument.safeParse({ ...document, features: [{ ...document.features[0], refs: [{ kind: "feature", id: "invented-developer-reference" }] }] }).success).toBe(false);
+});
+
+
+test("failed detailed generation survives reload and resumes the same pipeline without losing approval", async ({ page }) => {
+  test.setTimeout(60000);
+  const api = await projectServer({ apks: false, highLevel: async () => ({ document: structuredClone(document), response: "Ready." }) });
+  try {
+    let project = await createOutline(api); const runner = api.service.pipeline.options.runner!;
+    api.service.pipeline.options.runner = async task => { await write(path.join(task.run, "run.json"), { status: "failed", active_stage: "design", stages: {}, calls: [], error: "Synthetic local design correction needed" }); return 1; };
+    const failed = await wait(api, await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision }));
+    expect(failed.status).toBe("failed"); expect(failed.error?.code).toBe("design_review_failed");
+    const pipelineId = (await api.service.storedJob(failed.id)).pipelineJobId;
+    await page.route("**/api/**", async route => { const request = route.request(), url = new URL(request.url()); const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined }); await route.fulfill({ response }); });
+    await page.goto(`/?project=${project.id}`); await expect(page.getByRole("heading", { name: "Your app preparation stopped." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Design preparation stopped" })).toBeVisible();
+    await page.reload(); await expect(page.getByRole("button", { name: "Continue from saved progress" })).toBeVisible();
+    api.service.pipeline.options.runner = runner;
+    await page.getByRole("button", { name: "Continue from saved progress" }).click(); await expect(page.getByRole("heading", { name: "Your Android app is ready." })).toBeVisible();
+    expect((await api.service.storedJob(failed.id)).status).toBe("failed");
+    project = await api.service.get(project.id); expect(project.highLevelDesign!.developerRevision).toBe(project.currentDesignRevision); expect(api.counts().buildCalls).toBe(1);
+    const files = await import("node:fs/promises"); const names = await files.readdir(path.join(api.options.directory, "jobs"));
+    const retries = await Promise.all(names.map(name => api.service.storedJob(name.slice(0, -5))));
+    expect(retries.some(job => job.id !== failed.id && job.pipelineJobId === pipelineId && job.status === "succeeded")).toBe(true);
+    const stale = await fetch(api.address + `/api/jobs/${failed.id}/resume`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); expect(stale.status).toBe(409);
+  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+});
+
+test("reference analysis runs during outline editing and approval reuses its saved attempt", async ({ page }) => {
+  test.setTimeout(60000);
+  let downloads = 0;
+  const api = await projectServer({ apks: false, prepareReferences: true, highLevel: async () => ({ document: structuredClone(document), response: "Ready." }), acquireApk: async (appId, destination) => {
+    downloads++; await mkdir(path.dirname(destination), { recursive: true }); zipApk(destination);
+    await write(`${destination}.provenance.json`, { packageId: appId, sha256: await fileSha(destination), source: "Synthetic downloader fixture" }); return destination;
+  } });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const calls: { analysisOnly?: boolean; basis?: string; run: string; staticRun?: string }[] = [];
+  const runner = api.service.pipeline.options.runner!;
+  api.service.pipeline.options.runner = async task => {
+    calls.push(task);
+    if (task.analysisOnly) {
+      await gate;
+      await write(path.join(task.run, "run.json"), { status: "partial", stages: {}, calls: [], error: "Synthetic incomplete analysis; retain for provenance" });
+      await write(path.join(task.run, "apps.lock.json"), []); return 1;
+    }
+    return runner(task);
+  };
+  try {
+    let project = await createOutline(api);
+    await expect.poll(() => calls.length).toBe(1); expect(calls[0].analysisOnly).toBe(true);
+    const preparationId = project.referencePreparationId!;
+    expect(preparationId).toBeTruthy(); expect(project.activeJobId).toBeNull(); expect(project.referencePreparation?.status).toBe("running");
+    const repeated = await call<Project>(api, `/api/projects/${project.id}/reference-preparation`, {});
+    expect(repeated.referencePreparationId).toBe(preparationId); expect(repeated.version).toBe(project.version);
+    await page.route("**/api/**", async route => { const request = route.request(), url = new URL(request.url()); const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined }); await route.fulfill({ response }); });
+    await page.goto(`/?project=${project.id}`); await expect(page.getByText("Preparing references in the background", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Approve design and build app" })).toBeEnabled();
+
+    const changed = structuredClone(document); changed.features[0].summary = "Capture notes with one tap.";
+    project = await call<Project>(api, `/api/projects/${project.id}/high-level`, { expectedVersion: project.version, baseRevision: project.highLevelDesign!.revision, document: changed }, "PATCH");
+    expect(project.referencePreparationId).toBe(preparationId);
+    const approved = await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision });
+    expect(calls).toHaveLength(1); release();
+    expect((await wait(api, approved)).status).toBe("succeeded");
+    await expect.poll(async () => (await api.service.get(project.id)).latestBuild?.status).toBe("succeeded");
+    expect(downloads).toBe(project.referencePreparation!.progress!.apps.length);
+    expect(calls).toHaveLength(2); expect(calls[1].basis).toBe("market"); expect(calls[1].staticRun).toBe(calls[0].run);
+    const stored = await api.service.storedJob(approved.id), pipeline = await api.service.pipeline.get(stored.pipelineJobId!);
+    expect(pipeline.referenceJobId).toBe(preparationId); expect(pipeline.input.approved_outline!.document).toEqual(changed);
+    const evidence = await import("node:fs/promises"); expect(JSON.parse(await evidence.readFile(path.join(calls[0].run, "run.json"), "utf8")).error).toContain("Synthetic incomplete analysis");
+  } finally { release(); await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+});
+
+test("unavailable background APKs do not block feature choices, editing or detailed generation", async () => {
+  const api = await projectServer({ apks: false, prepareReferences: true, highLevel: async () => ({ document: structuredClone(document), response: "Ready." }) });
+  try {
+    let project = await createOutline(api); await api.service.pipeline.idle(); project = await api.service.get(project.id);
+    expect(project.referencePreparation?.status).toBe("succeeded"); expect(project.activeJobId).toBeNull(); expect(api.counts().analysisCalls).toBe(0);
+    expect(project.referencePreparation?.progress?.apps.every(app => app.download.status === "failed" && app.analysis === "skipped")).toBe(true);
+    const approved = await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision });
+    expect((await wait(api, approved)).status).toBe("succeeded"); expect(api.counts().analysisCalls).toBe(1);
+  } finally { await api.close(); }
 });

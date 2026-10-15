@@ -67,8 +67,8 @@ test("failed analysis resumes the same checkpoint and rejects changed profiles",
     const checkpoint = (await api.service.storedJob(failed.id)).pipelineJobId;
     api.service.pipeline.options.runner = runner;
     const resumed = await wait(api, await call<Job>(api, `/api/jobs/${failed.id}/resume`, {}));
-    expect(resumed.status).toBe("waiting_user"); expect(resumed.id).toBe(failed.id);
-    expect((await api.service.storedJob(failed.id)).pipelineJobId).toBe(checkpoint);
+    expect(resumed.status).toBe("waiting_user"); expect(resumed.id).not.toBe(failed.id); expect((await api.service.storedJob(failed.id)).status).toBe("failed");
+    expect((await api.service.storedJob(resumed.id)).pipelineJobId).toBe(checkpoint);
     api.service.pipeline.options.runner = async () => { throw new Error("Temporary analysis failure"); };
     p = await research(api, await create(api));
     const stale = await wait(api, await call<Job>(api, `/api/projects/${p.id}/design`, action(p)));

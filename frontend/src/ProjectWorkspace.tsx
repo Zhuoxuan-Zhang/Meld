@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import BrowserEmulator from "./BrowserEmulator";
 import HighLevelReview from "./HighLevelReview";
+import ReferenceApps, { FeatureMix } from "./ReferenceApps";
 import { Icon } from "./icons";
 import { api, action, projectUrl } from "./api";
 import type { Availability, ProjectList, Project, Job } from "./api";
@@ -22,7 +24,7 @@ function ProductChoice({ conflict, value, choose }: { conflict: Conflict; value?
 function PipelineStatus({ progress }: { progress: PipelineProgress }) {
   const labels = { pending: "Not started", running: "In progress", completed: "Complete", failed: "Needs attention", waiting: "Your choice needed" };
   return <div className="studio-card studio-pipeline" aria-label="Design generation progress">
-    <h2>Preparing your design</h2><ol className="studio-pipeline-steps">{progress.steps.map(step => <li key={step.id} data-status={step.status}><strong>{step.label}</strong><span>{labels[step.status]}</span></li>)}</ol>
+    <h2>{progress.steps.some(step => step.status === "failed") ? "Design preparation stopped" : "Preparing your design"}</h2><ol className="studio-pipeline-steps">{progress.steps.map(step => <li key={step.id} data-status={step.status}><strong>{step.label}</strong><span>{labels[step.status]}</span></li>)}</ol>
   </div>;
 }
 export default function ProjectWorkspace() {
@@ -41,6 +43,7 @@ export default function ProjectWorkspace() {
 
   const outline = project?.needsResearch ? undefined : project?.highLevelDesign;
   const design = project?.needsDesign ? undefined : project?.design, decision = project?.pendingDecision;
+  const choosingFeatures = Boolean(project && !project.needsResearch && project.needsDesign && !outline && !project.activeJobId);
   const navigate = (next: Step) => { setStep(next); setHistory(null); main.current?.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const load = useCallback(async (id: string) => {
     const value = await api<Project>(projectUrl(id)); setProject(value); projectId.current = value.id;
@@ -48,7 +51,7 @@ export default function ProjectWorkspace() {
   }, []);
   const openProject = useCallback(async (id: string) => {
     setLoading(true); setError(""); setJob(null);
-    try { const value = await load(id); setBrief(value.brief); setSelections(value.featurePreferences.selections); setCustom(value.featurePreferences.customRequests); localStorage.setItem("meld.project-id", id); historyReplace(id); setStep(value.latestBuild?.revision === value.currentDesignRevision && !value.needsDesign ? "app" : value.needsResearch ? "describe" : "review"); }
+    try { const value = await load(id); setBrief(value.brief); setSelections(value.featurePreferences.selections); setCustom(value.featurePreferences.customRequests); localStorage.setItem("meld.project-id", id); historyReplace(id); setStep(value.latestBuild?.revision === value.currentDesignRevision && !value.needsDesign ? "app" : value.needsResearch ? "describe" : "review"); const latest = await api<{ job: Job | null }>(`${projectUrl(id)}/latest-job`); setJob(latest.job); if (latest.job?.status === "failed") setError(latest.job.error?.message || "This step stopped. Your saved progress is preserved."); }
     catch (error) { setError((error as Error).message); localStorage.removeItem("meld.project-id"); }
     finally { setLoading(false); }
   }, [load]);
@@ -72,6 +75,28 @@ export default function ProjectWorkspace() {
     };
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
   }, [pollingJobId, load, pollTick]);
+  useEffect(() => {
+    if (!availability?.backgroundReferencesAvailable || !project || project.needsResearch || !project.needsDesign || project.referencePreparationId || !Object.keys(project.references).length) return;
+    const controller = new AbortController();
+    void api<Project>(`${projectUrl(project.id)}/reference-preparation`, {}, "POST", controller.signal).then(saved => {
+      if (!controller.signal.aborted) setProject(current => current?.id === saved.id && saved.version >= current.version ? saved : current);
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [availability?.backgroundReferencesAvailable, project?.id, project?.needsResearch, project?.needsDesign, project?.referencePreparationId]);
+  useEffect(() => {
+    if (!project?.referencePreparation || !["queued", "running"].includes(project.referencePreparation.status) || pollingJobId) return;
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const current = await api<Project>(projectUrl(project.id), undefined, "GET", controller.signal);
+        if (controller.signal.aborted || projectId.current !== current.id) return;
+        setProject(current);
+        if (["queued", "running"].includes(current.referencePreparation?.status || "")) timer = setTimeout(poll, 2500);
+      } catch { if (!controller.signal.aborted) timer = setTimeout(poll, 5000); }
+    };
+    timer = setTimeout(poll, 1200);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [project?.id, project?.referencePreparation?.id, project?.referencePreparation?.status, pollingJobId]);
   useEffect(() => { if (job?.type === "detail" || job?.type === "build") setStep("app"); }, [job?.id]);
   useEffect(() => {
     setEdits({});
@@ -133,7 +158,8 @@ export default function ProjectWorkspace() {
       <button className="studio-mobile-profile" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>Your app <Icon name="ChevronDown" size={18} /></button>
       <div className="studio-profile"><p className="studio-eyebrow">YOUR APP</p><h2>{outline?.document.title || design?.document.title || project?.brief.name || "An idea worth making"}</h2><p>{project?.brief.goal || project?.brief.purpose || project?.brief.input || "Describe an idea. Make it yours. Bring it to life."}</p>
         {project?.brief.audience && <p className="studio-audience"><Icon name="Heart" size={15} /><span>{project.brief.audience}</span></p>}
-        {featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
+        {!choosingFeatures && featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
+        {choosingFeatures && <FeatureMix apps={catalog} selections={selections} custom={custom} disabled={busy} remove={selectFeature} removeCustom={id => setCustom(current => current.filter(feature => feature.id !== id))} />}
         {design && <span className="studio-pill">Design v{design.version}{project?.approvedRevision === design.revision ? " · approved" : " · ready to review"}</span>}
         {project && <button className="studio-text-button" disabled={busy} onClick={() => { setBrief(project.brief); navigate("describe"); }}>Edit app profile <Icon name="NotebookPen" size={14} /></button>}
       </div>
@@ -142,7 +168,7 @@ export default function ProjectWorkspace() {
     <div className="studio-body"><header className="studio-header"><span>Workspace <Icon name="ChevronRight" size={15} />{project?.brief.name || "Your next app"}</span><span className="studio-autosave"><i />{project ? "Saved" : "A little idea, a useful app"}</span></header>
       <main id="studio-main" ref={main} tabIndex={-1} className="studio-main">
         <nav className="studio-steps" aria-label="App creation steps">{steps.map((item, index) => <button key={item.id} aria-current={step === item.id ? "step" : undefined} disabled={(item.id !== "describe" && !project) || (item.id === "app" && (job?.type !== "detail" && (!project?.latestBuild || project.latestBuild.revision !== project.currentDesignRevision || project.needsDesign)))} onClick={() => navigate(item.id)}><span>{index + 1}</span>{item.label}</button>)}</nav>
-        {error && <div className="studio-error" role="alert"><Icon name="CircleAlert" size={18} /><div>{error}<button className="studio-text-button" onClick={() => { setError(""); if (project) void load(project.id); }}>Refresh project</button></div></div>}
+        {error && <div className="studio-error" role="alert"><Icon name="CircleAlert" size={18} /><div>{error}{job?.status === "failed" && (job.type === "detail" || job.type === "design" && job.progress) && <button className="studio-text-button" disabled={busy} onClick={() => { void perform(() => startJob(`/api/jobs/${job.id}/resume`, {})); }}>Continue from saved progress <Icon name="ArrowRight" size={16} /></button>}<button className="studio-text-button" onClick={() => { setError(""); if (project) void load(project.id); }}>Refresh project</button></div></div>}
         {loading ? <p role="status">Loading your app…</p> : <>
           {step === "describe" && <section className="studio-describe"><p className="studio-eyebrow">START WITH AN IDEA</p><h1>What would you love<br />your app to do?</h1><p className="studio-lead">Tell us what you need. We’ll find useful ideas, help you shape the experience, and turn your design into an Android app.</p>
             <form className="studio-idea-form" onSubmit={event => { event.preventDefault(); void describe(); }}><label htmlFor="app-idea">Describe your app</label><textarea id="app-idea" value={brief.input} onChange={event => setBrief({ ...brief, input: event.target.value })} rows={5} maxLength={6000} placeholder="I want a simple notes app. I need to capture ideas quickly, find them later, and keep everything on my phone." required />
@@ -156,17 +182,14 @@ export default function ProjectWorkspace() {
           {step === "review" && project && <section><p className="studio-eyebrow">MAKE IT YOURS</p><h1>{outline || design ? "Your app, in plain language." : "Choose features from the top reference apps."}</h1><p className="studio-lead">{outline || design ? "Review what it will do, adjust the details, then approve the version you want to build." : "Review the top five apps found from market signals. Choose or customize their features, add your own, then confirm to generate your design document."}</p>
             {busy && <div className="studio-progress" role="status"><Icon name="LoaderCircle" size={21} /><div><strong>{job?.phase || "Working on your app…"}</strong><p>Your project is saved. You can come back to this page.</p></div></div>}
             {job?.progress && <PipelineStatus progress={job.progress} />}
+            {project.referencePreparation && !busy && <div className="studio-reference-preparation" role="status"><Icon name={["queued", "running"].includes(project.referencePreparation.status) ? "LoaderCircle" : "CircleCheck"} size={18} /><div><strong>{["queued", "running"].includes(project.referencePreparation.status) ? "Preparing references in the background" : "Reference preparation finished"}</strong><p>{["queued", "running"].includes(project.referencePreparation.status) ? `${project.referencePreparation.phase} Keep shaping your app while we work.` : "Available reference results will be reused after you approve your design."}</p></div></div>}
+
             {job?.status === "waiting_inputs" && <div className="studio-card studio-waiting"><h2>Continue preparing your design.</h2><p>We can use available references and market information to continue.</p><button className="studio-button secondary" disabled={busy} onClick={() => { void perform(() => startJob(`/api/jobs/${job.id}/resume`, {})); }}>Continue generating design <Icon name="ArrowRight" size={16} /></button></div>}
             {project.needsResearch && !busy && <div className="studio-card"><h2>Start with a little research.</h2><p>We’ll look for relevant apps and useful feature ideas.</p><button className="studio-button primary" onClick={() => { void perform(() => startJob(`${projectUrl(project.id)}/research`, action(project))); }}>Explore ideas <Icon name="ArrowRight" size={16} /></button></div>}
             {!project.needsResearch && project.needsDesign && !outline && !project.activeJobId && <div className="studio-card">
               <h2>What would you like to keep?</h2><p>Top {referenceApps.length} reference apps, ranked by market-signal score. Their features come from store listings, not verified APK behavior.</p>
-              <div className="studio-market-apps">{referenceApps.map((app, index) => <article className="studio-market-app" key={app.id} aria-label={`Reference app: ${app.name}`}>
-                <div className="studio-section-head"><div><p className="studio-eyebrow">REFERENCE #{index + 1}</p><h3>{app.name}</h3><p>{app.tagline}</p><p className="studio-note">{app.market?.rating === null ? "Not rated" : `${app.market?.rating?.toFixed(1)} stars`} · Market signal {app.market?.score}/15 · {app.market?.listedFeatures ? "Features from store description" : "Feature suggestions matched from listing keywords"}</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={14} /></a></div>
-                <div className="studio-feature-picks">{app.features.map(feature => {
-                  const override = custom.find(item => item.id === feature.id), value = override || feature;
-                  return <div className="studio-feature-choice" key={feature.id}><label><input type="checkbox" checked={selections[app.id]?.includes(feature.id) || false} onChange={event => selectFeature(app.id, feature.id, event.target.checked)} /><span><strong>{value.name}</strong><small>{value.description}</small>{override && <em>Customized for your app</em>}</span></label><details className="studio-feature-edit"><summary>Customize {feature.name}</summary><label>Feature name<input value={value.name} maxLength={120} onChange={event => customizeFeature(app.id, { id: feature.id, name: event.target.value, description: value.description })} /></label><label>How should it work?<textarea aria-label="How should it work?" value={value.description} rows={3} maxLength={1000} onChange={event => customizeFeature(app.id, { id: feature.id, name: value.name, description: event.target.value })} /></label></details></div>;
-                })}</div>{!app.features.length && <p className="studio-note">No feature summary is available for this listing. Add your own feature below.</p>}
-              </article>)}</div>
+              <ReferenceApps apps={referenceApps} selections={selections} custom={custom} disabled={busy} select={selectFeature} customize={customizeFeature} selectAll={(appId, ids) => { setSelections(current => ({ ...current, [appId]: ids })); if (!ids.length) setCustom(current => current.filter(feature => !catalog.find(app => app.id === appId)?.features.some(item => item.id === feature.id))); }} />
+              <div className="studio-mobile-mix"><FeatureMix apps={catalog} selections={selections} custom={custom} disabled={busy} remove={selectFeature} removeCustom={id => setCustom(current => current.filter(feature => feature.id !== id))} /></div>
               {!referenceApps.length && <p className="studio-note">No ranked reference apps are available. Try another search topic.</p>}
               {Object.values(project.references).flatMap(scan => scan.warnings.map(warning => <p className="studio-note" key={`${scan.domain}:${warning}`}>{warning}</p>))}
               <label className="studio-input-label">Your own feature idea<div className="studio-inline"><input value={featureInput} maxLength={120} onChange={event => setFeatureInput(event.target.value)} placeholder="Describe a feature you’d like to add" /><button className="studio-button secondary" disabled={!featureInput.trim() || custom.length >= 20} onClick={() => { setCustom(current => [...current, { id: `custom-${crypto.randomUUID()}`, name: featureInput.trim(), description: featureInput.trim() }]); setFeatureInput(""); }}>Add</button></div></label>
@@ -187,8 +210,9 @@ export default function ProjectWorkspace() {
             </>}
             {Object.values(project.references).length > 0 && <details className="studio-details studio-research"><summary>Explore the research behind these ideas</summary><p>Store listings and reviews are market signals. Verified behavior comes from analyzing the reference APKs.</p>{Object.values(project.references).map(scan => <div key={scan.domain}><h3>{scan.domain}</h3><p>{scan.status === "complete" ? "Top reference apps" : "Partial research results"} · {scan.generatedAt.slice(0, 10)}</p>{scan.apps.filter(app => !app.retained).map(app => <a className="studio-reference" href={app.storeUrl} target="_blank" rel="noreferrer" key={app.appId}><span className="studio-reference-rank">{app.rank}</span><div><strong>{app.title}</strong><p>{app.summary}</p><small>{app.rating === null ? "Not rated" : `${app.rating.toFixed(1)} stars`} · Opportunity {app.score}/15</small></div><Icon name="ExternalLink" size={16} /></a>)}{scan.warnings.map(warning => <p className="studio-note" key={warning}>{warning}</p>)}</div>)}</details>}
           </section>}
-          {step === "app" && project && <section><p className="studio-eyebrow">FROM IDEA TO APP</p><h1>{project.latestBuild?.status === "succeeded" ? "Your Android app is ready." : "Bringing your app to life."}</h1><p className="studio-lead">{project.brief.name || design?.document.title} · {project.latestBuild?.revision || project.currentDesignRevision}</p>{busy && <div className="studio-progress" role="status"><Icon name="LoaderCircle" size={22} /><div><strong>{job?.phase || "Building your approved design…"}</strong><p>Implementation, build and checks all belong to this saved design version.</p></div></div>}
+          {step === "app" && project && <section><p className="studio-eyebrow">FROM IDEA TO APP</p><h1>{project.latestBuild?.status === "succeeded" ? "Your Android app is ready." : job?.status === "failed" ? "Your app preparation stopped." : "Bringing your app to life."}</h1><p className="studio-lead">{project.brief.name || design?.document.title} · {project.latestBuild?.revision || project.currentDesignRevision}</p>{busy && <div className="studio-progress" role="status"><Icon name="LoaderCircle" size={22} /><div><strong>{job?.phase || "Building your approved design…"}</strong><p>Implementation, build and checks all belong to this saved design version.</p></div></div>}{job?.progress && <PipelineStatus progress={job.progress} />}
             <div className="studio-card studio-delivery"><div className="studio-delivery-icon"><Icon name="Monitor" size={38} /></div><h2>{project.latestBuild?.status === "succeeded" ? "A real app, ready for your phone." : "Your approved design is saved."}</h2><p>{project.latestBuild?.status === "succeeded" ? "Download the APK and install it on your Android device." : "We’ll show the download here once the implementation and build checks pass."}</p>{project.latestBuild?.status === "succeeded" && project.latestBuild.artifacts.filter(artifact => artifact.name.endsWith(".apk")).map(artifact => <a className="studio-button primary" href={artifact.url} key={artifact.name}>Download Android app <Icon name="Download" size={17} /></a>)}{project.latestBuild?.validation && <p className="studio-note">Build, unit tests and lint passed. {project.latestBuild.validation.runtimeVerified ? "Device checks passed." : "Device interaction is not yet verified."}</p>}{!busy && project.latestBuild?.status !== "succeeded" && design && <button className="studio-button primary" onClick={() => { void perform(() => startJob(`${projectUrl(project.id)}/builds`, { ...action(project), revision: design.revision })); }}>Retry build</button>}<button className="studio-text-button" onClick={() => navigate("review")}>Back to your design <Icon name="ArrowLeft" size={15} /></button></div>
+            {project.latestBuild?.status === "succeeded" && project.latestBuild.revision === project.currentDesignRevision && !project.needsDesign && <BrowserEmulator key={project.latestBuild.id} projectId={project.id} buildId={project.latestBuild.id} available={Boolean(availability?.emulatorAvailable)} />}
             {project.latestBuild?.artifacts.length ? <details className="studio-details"><summary>Build files and verification</summary>{project.latestBuild.artifacts.filter(a => !a.name.endsWith(".apk")).map(artifact => <a className="studio-project-row" href={artifact.url} key={artifact.name}>{artifact.name}<Icon name="Download" size={15} /></a>)}</details> : null}
           </section>}
         </>}

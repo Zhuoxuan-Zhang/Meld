@@ -14,7 +14,7 @@ export function paletteErrors(tokens: { role: string; value: string }[]): string
   for (const theme of themes.length ? themes : ['']) {
     const candidates = normalized.filter(token => theme ? token.name.startsWith(theme) : !/^(light|dark)/.test(token.name));
     const get = (pattern: RegExp, exclude?: RegExp) => candidates.find(token => pattern.test(token.name) && !(exclude?.test(token.name)))?.value;
-    const palette: Record<string, string | undefined> = { primary: get(/primary|accent/, /onprimary|onaccent|textprimary|primarytext/), onPrimary: get(/onprimary|onaccent/), textPrimary: get(/textprimary|primarytext|(?:light|dark)text$/), background: get(/background$/), surface: get(/surface$/) };
+    const palette: Record<string, string | undefined> = { primary: get(/primary|accent/, /onprimary|onaccent|textprimary|primarytext/), onPrimary: get(/onprimary|onaccent/), textPrimary: get(/textprimary|primarytext|^(?:light|dark)?text$/), background: get(/background$/), surface: get(/surface$/) };
     for (const [a, b] of [['primary', 'onPrimary'], ['textPrimary', 'background'], ['textPrimary', 'surface']]) {
       try { if (!palette[a] || !palette[b] || contrast(palette[a]!, palette[b]!) < 4.5) errors.push(`Insufficient contrast ${theme ? theme + ' ' : ''}${a}/${b}`); } catch (error) { errors.push(String(error)); }
     }

@@ -29,4 +29,4 @@ const server = createServer((request, response) => {
 const port = Number(env.MELD_API_PORT || 3001);
 server.listen(port, "127.0.0.1", () => console.log(`Meld backend: http://127.0.0.1:${port}`));
 server.on("error", error => { console.error(error.message); process.exitCode = 1; });
-for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { stopOwnedProcesses(); server.close(); setTimeout(() => process.exit(0), 3000).unref(); });
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { stopOwnedProcesses(); options.emulator?.close(); server.close(); setTimeout(() => process.exit(0), 3000).unref(); });

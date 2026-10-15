@@ -10,6 +10,6 @@ export async function api<T>(url: string, body?: unknown, method = body === unde
 }
 export const projectUrl = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
 export const action = (project: Project) => ({ requestKey: crypto.randomUUID(), expectedVersion: project.version });
-export type Availability = { available: boolean; exampleId: string | null; researchAvailable: boolean; designAvailable: boolean; buildAvailable: boolean };
+export type Availability = { emulatorAvailable?: boolean; backgroundReferencesAvailable?: boolean; available: boolean; exampleId: string | null; researchAvailable: boolean; designAvailable: boolean; buildAvailable: boolean };
 export type ProjectList = { projects: { id: string; name: string; input: string; updatedAt: string }[] };
 export type { Project, Job };

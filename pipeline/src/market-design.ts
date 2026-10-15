@@ -31,6 +31,8 @@ async function execute() {
   let state: any;
   if (await exists(path.join(run, 'run.json'))) { state = await json(path.join(run, 'run.json')); if (state.fingerprint?.digest !== identity) throw new Error('Market design inputs changed; create a new request'); }
   else state = { id: path.basename(run), mode: 'market_assisted_design', status: 'running', created_at: new Date().toISOString(), config, stages: {}, calls: [], fingerprint: { digest: identity }, human_decisions: !brief.market_signals?.approved_high_level };
+  if (state.status === 'failed') await write(path.join(run, 'synthesis', `failed-state-${Date.now()}.json`), state);
+  state.status = 'running'; delete state.error;
   await write(path.join(run, 'brief.json'), brief); await write(path.join(run, 'apps.lock.json'), locks);
   await write(path.join(run, 'market-input.json'), market); await write(path.join(run, 'static-source-provenance.json'), provenance);
   for (const spec of specs) await write(path.join(run, 'apps', spec.app_id, 'app-spec.json'), spec);

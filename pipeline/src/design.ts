@@ -8,6 +8,7 @@ import { validateComparison, validateDecisions, validateDesign } from './validat
 import { renderDesign } from './render.js';
 import { stage } from './state.js';
 import { DesignPatch, applyDesignPatch } from './design-patch.js';
+import { designErrors } from './workbench/validation.js';
 import { zodTextFormat } from 'openai/helpers/zod';
 const DesignCore=UnifiedDesign.omit({pages:true,visual:true,compose:true});
 const DesignPages=UnifiedDesign.pick({pages:true});
@@ -52,7 +53,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     prior = saved; priorFragmentCalls = record.fragment_calls; priorPatchCalls = record.patch_calls || []; review = reviews.length ? await json(path.join(dir, reviews[0])) : null; startRound = round + 1;
   }
   if (prior) {
-    const errors = validateDesign(prior, base.brief, decisions, base.specs);
+    const errors = designErrors({ design: prior, brief: base.brief, decisions }, comparison, base.specs);
     // A completed saved draft may only need its interrupted review. Its three
     // model fragments were checked above; require a fresh review before reuse.
     if (!errors.length && priorFragmentCalls.length === 3 && prior.status === 'final' && !review?.issues.some((i: any) => i.severity === 'blocking')) {
@@ -68,7 +69,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     let design: any, fragmentCalls: string[], patchCalls: string[] = [], kind = 'fragment';
     if (prior && priorFragmentCalls.length === 3) {
       const patch = await model.ask(`design-corrections-${round}`, prompt + '\nRepair only the supplied review findings with narrow replacements of existing JSON fields. path is relative to the design root, such as ["features","0","behavior"] or ["pages","1","back_behavior"]. For arrays of objects with id fields, use the item id instead of its numeric index, for example ["pages","page-editor","back_behavior"]. This avoids editing a neighboring item. Do not include the context key prior_design. For string fields use format=text and a plain value without JSON quoting. Use format=json only for objects, arrays, numbers, booleans or null; value must then be valid JSON. To append an array item, use - as the final path segment, for example ["pages","page-editor","states","-"]. To remove or reorder items, replace the containing array. Do not leave index gaps. Preserve all unrelated fields, IDs, copy, scope and accepted behavior exactly. Apply each correction consistently across relevant entities, flows, pages, states, contracts and acceptance cases. All replacement values must satisfy target_schema, including its enums and required fields. Every response must be a complete corrected patch against the unchanged supplied prior_design. Failed patches are atomic: none of their edits have been applied. On a retry, include every still-needed edit and append from the previous attempt, not just the fixes to its errors. Do not redesign the app or return the full design.', { ...base, comparison, decisions, prior_design: prior, review, target_schema: DesignTargetSchema }, DesignPatch, value => {
-        try { return validateDesign(applyDesignPatch(prior, value), base.brief, decisions, base.specs); } catch (error) { return [String(error)]; }
+        try { return designErrors({ design: applyDesignPatch(prior, value), brief: base.brief, decisions }, comparison, base.specs); } catch (error) { return [String(error)]; }
       });
       design = applyDesignPatch(prior, patch); kind = 'patched'; fragmentCalls = priorFragmentCalls;
       patchCalls = [...priorPatchCalls, ...state.calls.slice(before).filter((c: any) => c.success && c.stage === `design-corrections-${round}`).map((c: any) => c.id)];
@@ -79,7 +80,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     fragmentCalls=state.calls.slice(before).filter((c:any)=>c.success).map((c:any)=>c.id);
     design=UnifiedDesign.parse({...core,...pages,...contracts});
     }
-    const errors=validateDesign(design,base.brief,decisions,base.specs);
+    const errors=designErrors({ design, brief: base.brief, decisions }, comparison, base.specs);
     await write(path.join(dir,`${kind}-design-${round}-${Date.now()}.json`),design);
     await write(path.join(dir,`${kind}-validation-${round}-${Date.now()}.json`),{passed:!errors.length,errors,fragment_calls:fragmentCalls,patch_calls:patchCalls});
     review=await model.ask(`design-review-${kind}-${round}`,await model.prompt('review'),{kind:'unified-design',...base,comparison,decisions,design,program_errors:errors},Review);
@@ -132,5 +133,5 @@ export async function synthesize(run: string, state: any, claude: Claude, brief:
     await write(path.join(dir, 'design-review.json'), review);
     await write(path.join(run, 'final/final-design.json'), design); await renderDesign(path.join(run, 'final'), design);
     if (design.status !== 'final') throw new Error('Design remains draft after two targeted review repairs');
-  }, async () => validateDesign(await json(path.join(run, 'final/final-design.json')), brief, decisions, specs));
+  }, async () => designErrors({ design: await json(path.join(run, 'final/final-design.json')), brief, decisions }, comparison, specs));
 }

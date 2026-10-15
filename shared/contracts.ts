@@ -33,12 +33,14 @@ export type PipelineProgress = {
   modelCalls?: number;
 };
 export type Job = { resumable?: boolean; id: string; projectId: string; type: "research" | "design" | "detail" | "change" | "confirm" | "restore" | "build"; status: JobStatus; phase: string; createdAt: string; updatedAt: string; result?: unknown; error?: { code: string; message: string }; missingInputs?: string[]; progress?: PipelineProgress; internalJobId?: string };
+export type EmulatorSession = { id: string; projectId: string; buildId: string; apkSha256: string; status: "starting" | "ready" | "failed"; phase: string; width: number; height: number };
 export type Build = { id: string; revision: string; designHash: string; status: JobStatus; artifacts: { name: string; url: string; sha256: string }[]; validation?: { build: boolean; unitTests: boolean; lint: boolean; runtimeVerified: boolean; limitations: string[] } };
 export type Project = {
   id: string; version: number; createdAt: string; updatedAt: string; brief: Brief;
   references: Record<string, MarketResult>; featurePreferences: { selections: Record<string, string[]>; customRequests: FeatureRequest[] };
   designId: string | null; currentDesignRevision: string | null; approvedRevision: string | null;
   pendingDecision: Decision | null; lastJobId?: string; activeJobId: string | null; latestBuild: Build | null; lastDeliveredBuild?: Build;
+  referencePreparationId?: string; referencePreparation?: { id: string; status: JobStatus; phase: string; progress?: PipelineProgress };
   highLevelVersion?: number; highLevelDesign?: HighLevelDesign; highLevelFeedback?: string; needsResearch: boolean; needsDesign: boolean; design?: DesignView;
   designHistory?: { designId: string; revision: string }[];
 };

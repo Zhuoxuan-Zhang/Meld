@@ -7,7 +7,7 @@ export default defineConfig({
   workers: 3,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: process.env.MELD_TEST_URL || "http://127.0.0.1:4173",
     channel: process.env.MELD_BROWSER_EXECUTABLE || process.env.MELD_BROWSER_CHANNEL === "chromium" ? undefined : "chrome",
     launchOptions: process.env.MELD_BROWSER_EXECUTABLE ? { executablePath: process.env.MELD_BROWSER_EXECUTABLE } : {},
     headless: true,
@@ -16,7 +16,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run dev",
-    url: "http://127.0.0.1:4173",
+    url: process.env.MELD_TEST_URL || "http://127.0.0.1:4173",
     reuseExistingServer: true,
     timeout: 90000,
   },

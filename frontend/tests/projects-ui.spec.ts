@@ -23,7 +23,9 @@ test("three-step workflow: idea → research → human choices → design → se
     const appOrder = await page.locator(".studio-market-app h3").allTextContents();
     expect(appOrder.length).toBeGreaterThan(0); expect(appOrder.length).toBeLessThanOrEqual(5);
     expect(api.counts().analysisCalls).toBe(0);
-    expect(await page.locator(".studio-feature-choice").count()).toBe(appOrder.length * 3);
+    await expect(page.locator(".studio-feature-choice")).toHaveCount(0);
+    await page.getByRole("button", { name: `Explore ${appOrder[0]}`, exact: true }).click();
+    await expect(page.locator(".studio-feature-choice")).toHaveCount(3);
     const feature = page.locator(".studio-feature-choice").filter({ hasText: "Quick notes" }).first();
     await feature.getByRole("checkbox").check();
     await feature.getByText("Customize Quick notes", { exact: true }).click();
@@ -89,5 +91,32 @@ for (const width of [320, 390, 1440]) test(`new workspace is accessible and fits
     await page.getByRole("button", { name: "Try the Notes example" }).click(); await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+});
+
+
+for (const width of [390, 1440]) test(`reference cards, screenshots and feature mix work together at ${width}px`, async ({ page }) => {
+  test.setTimeout(60000); const api = await projectServer({ listedFeatures: true });
+  try {
+    await page.setViewportSize({ width, height: 1000 }); await connect(page, api);
+    await page.route("https://play-lh.googleusercontent.com/**", route => route.request().url().includes("icon0") ? route.abort() : route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="240"><rect width="120" height="240" fill="#f5e5d5"/></svg>' }));
+    const saved = await (await page.request.post(api.address + "/api/projects", { data: { requestKey: randomUUID(), brief: idea } })).json();
+    await api.service.research(saved.id, { requestKey: randomUUID(), expectedVersion: saved.version }); await api.service.idle();
+    await page.goto(`/?project=${saved.id}`); await expect(page.locator(".studio-reference-card")).toHaveCount(5);
+    const first = page.locator(".studio-reference-card").first(), name = await first.locator("h3").innerText();
+    await expect(first.locator(".studio-reference-icon img")).toHaveCount(0); // Broken icon falls back to the initial.
+    await first.getByRole("button", { name: `Explore ${name}`, exact: true }).click();
+    await expect(first.getByRole("region", { name: `${name} store screenshots` }).getByRole("img")).toHaveCount(2);
+    const mix = width < 760 ? page.locator(".studio-mobile-mix") : page.getByRole("complementary", { name: "Your app profile" });
+    await first.getByRole("button", { name: "Select all", exact: true }).click();
+    await expect(first.getByRole("checkbox").first()).toBeChecked(); await expect(mix).toContainText("Quick notes");
+    await mix.getByRole("button", { name: `Remove Quick notes from ${name}`, exact: true }).click();
+    await expect(first.getByRole("checkbox").first()).not.toBeChecked();
+    await first.getByRole("button", { name: "Clear", exact: true }).click(); await expect(mix).toContainText("Pick the ideas you like");
+    await first.getByRole("checkbox").first().check(); await first.getByRole("button", { name: `Explore ${name}`, exact: true }).click();
+    await first.getByRole("button", { name: `Explore ${name}`, exact: true }).click(); await expect(first.getByRole("checkbox").first()).toBeChecked();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+    expect(api.counts().analysisCalls).toBe(0);
   } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
 });
