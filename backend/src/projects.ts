@@ -2,6 +2,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { DesignService, z, json, write, exists, withLock, semanticHash, WorkbenchError, ChangeRequest, ApplyRequest, RestoreRequest } from "../../pipeline/dist/src/integration.js";
+import type { BrowserEmulator } from "./emulator";
 import { PipelineJobs, DesignInput } from "./adapters/pipeline";
 import type { PipelineOptions } from "./adapters/pipeline";
 import { SignalsStore } from "./adapters/signals";
@@ -25,7 +26,7 @@ export const BuildAction = Action.extend({ revision: key });
 type StoredJob = Job & { projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
-export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; prepareReferences?: boolean; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
+export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; prepareReferences?: boolean; emulator?: BrowserEmulator; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
 const publicProposal = (proposal: Awaited<ReturnType<DesignService["createProposal"]>>): ChangeProposal => ({ id: proposal.id, base_revision: proposal.base_revision, request_text: proposal.request_text, plan: { ...proposal.plan, changes: proposal.plan.changes.map(({ operations: _operations, ...change }) => change) } });
 const publicDesign = (view: Awaited<ReturnType<DesignService["get"]>>, projectId: string) => ({ ...view, artifacts: view.artifacts.map(artifact => ({ ...artifact, url: `/api/projects/${projectId}/artifacts/${view.revision}/${encodeURIComponent(artifact.name)}` })) });
 
