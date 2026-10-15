@@ -1,6 +1,6 @@
 import { parseIntent } from "./intent";
 import type { Intent } from "./intent";
-import { fitsFilter } from "./feasibility";
+import { defaultComplexity, fitsFilter } from "./feasibility";
 import type { ComplexityFilter } from "./feasibility";
 import { canonicalDomain } from "./data";
 import { buildCatalog, parseMarketResult, referenceFit } from "./market";
@@ -32,6 +32,7 @@ export type Draft = {
 export const storageKey = "meld.workspace.v1";
 export const emptyDraft = (): Draft => ({
   version: 1,
+  complexity: defaultComplexity,
   workspaceId: crypto.randomUUID(),
   domains: [],
   selected: {},
@@ -87,7 +88,7 @@ export function loadDraft(): Draft {
       return typeof value.id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,239}$/.test(value.id) && typeof value.name === 'string' && value.name.length <= 120 && typeof value.description === 'string' && value.description.length <= 1000;
     }).slice(0, 20);
     if (typeof raw.projectId === "string" && /^project-[a-f\d-]{36}$/.test(raw.projectId)) d.projectId = raw.projectId;
-    d.complexity = raw.complexity === "review" ? "review" : "simple";
+    d.complexity = raw.complexity === "simple" ? "simple" : defaultComplexity;
     for (const key of ["designId", "designJobId", "designProposalId"] as const)
       if (typeof raw[key] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(raw[key])) d[key] = raw[key];
     d.domains = Array.isArray(raw.domains)

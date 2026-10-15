@@ -7,6 +7,7 @@ import { emptyDraft, loadDraft, storageKey, catalog, startDiscovery, withMarketR
 import type { Draft } from "./state";
 import { buildCatalog, referenceFit } from "./market";
 import { featureMatches, rankForIntent } from "./relevance";
+import { defaultComplexity } from "./feasibility";
 import { useMarket } from "./useMarket";
 import { useListedFeatures } from "./useFeatures";
 import type { Brief } from "../../shared/contracts";
@@ -25,7 +26,7 @@ export default function StudioDiscovery({ initialBrief, projectId, busy, confirm
   const plan = source === "idea" && draft.intent?.approved ? draft.intent.reply?.plan : undefined;
   const activeDomains = searching ? draft.domains : [];
   const market = useMarket(activeDomains, draft.market, (name, result) => setDraft(d => withMarketResult(d, name, result)), plan?.topics);
-  const listing = useListedFeatures(activeDomains, draft.market, features => setDraft(d => withListedFeatures(d, features)), draft.complexity === "review");
+  const listing = useListedFeatures(activeDomains, draft.market, features => setDraft(d => withListedFeatures(d, features)), (draft.complexity ?? defaultComplexity) === "review");
   useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify(draft)); } catch { setError("This browser could not save your choices. Keep this page open while you continue."); } }, [draft]);
   function update(patch: Partial<Draft>) {
     setDraft(d => ({ ...d, ...patch,
@@ -91,7 +92,7 @@ export default function StudioDiscovery({ initialBrief, projectId, busy, confirm
           const fits = scan?.apps.filter(a => eligible.some(e => e.id === a.appId)).length || 0;
           return <div className="studio-scan-row" key={name}><div><strong>{name}</strong><p className="studio-note" role="status">{pending?.phase === "scanning" ? "Searching Google Play…" : pending?.phase === "error" ? pending.message : scan ? `${fits} shown · ${scan.ranked} ranked${scan.failedRequests ? " · some requests failed" : ""}` : "Waiting for app search"}</p>{summaries?.phase === "running" && <p role="status" className="studio-note">Reading store listings… Feature summaries are still processing.</p>}{summaries?.phase === "error" && <p role="alert" className="studio-note">{summaries.message} <button className="studio-text-button" onClick={() => void listing.retry(name)}>Retry feature summaries</button></p>}{scan?.warnings.map(warning => <p key={warning} className="studio-note">{warning}</p>)}</div><button className="studio-text-button" disabled={pending?.phase === "scanning"} onClick={() => void market.scan(name, true)}>{pending?.phase === "error" ? "Retry search" : "Rescan"}</button></div>;
         })}
-        <div className="studio-form-grid"><label>Find an app or feature<input value={query} onChange={e => setQuery(e.target.value)} /></label><label>App complexity<select value={draft.complexity || "simple"} onChange={e => update({ complexity: e.target.value as Draft['complexity'] })}><option value="simple">Simple apps only</option><option value="review">Include apps needing review</option></select></label></div>
+        <div className="studio-form-grid"><label>Find an app or feature<input value={query} onChange={e => setQuery(e.target.value)} /></label><label>App complexity<select value={draft.complexity ?? defaultComplexity} onChange={e => update({ complexity: e.target.value as Draft['complexity'] })}><option value="review">Include apps needing review</option><option value="simple">Simple apps only</option></select></label></div>
         {hidden.length > 0 && <details className="studio-details"><summary>See what was filtered out ({hidden.length})</summary>{hidden.map(a => <p key={a.id}><strong>{a.name}</strong> — {referenceFit(a).reason}</p>)}</details>}
         {!shown.length && draft.domains.every(name => draft.market?.[name] && market.scans[name]?.phase !== "scanning") && <p role="status">{all.length ? "Apps were found, but none match these filters. Adjust the filter or your search." : "No apps were found for this search. Try another domain or rescan."}</p>}
         {!listing.connection?.available && eligible.some(a => !a.market?.listedFeatures) && <p className="studio-note">{listing.connection?.reason || "Connecting to feature summaries…"} <button className="studio-text-button" onClick={() => void listing.check()}>Retry summary connection</button></p>}

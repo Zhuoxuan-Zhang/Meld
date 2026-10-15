@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Icon } from "./icons";
-import { formatInstalls, sizedImage } from "./market";
+import { formatInstalls, referenceFit, sizedImage } from "./market";
 import type { ReferenceApp } from "./data";
 import type { FeatureRequest } from "../../shared/contracts";
 
@@ -19,6 +19,7 @@ type Props = { apps: ReferenceApp[]; selections: Record<string, string[]>; custo
 export default function ReferenceApps({ apps, selections, custom, disabled, select, customize, selectAll, matches }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return <div className="studio-reference-grid">{apps.map((app, index) => {
+    const fit = referenceFit(app);
     const open = expanded === app.id, selected = selections[app.id] || [], summarized = Boolean(app.market?.listedFeatures), ready = summarized && app.features.length > 0, allSelected = ready && app.features.every(f => selected.includes(f.id));
     return <article className={`studio-market-app studio-reference-card${open ? " is-open" : ""}${selected.length ? " has-selection" : ""}`} key={app.id} aria-label={`Reference app: ${app.name}`}>
       <button className="studio-reference-toggle" aria-label={`${allSelected ? "Clear" : "Select"} all features from ${app.name}`} aria-pressed={allSelected} disabled={disabled || !ready} onClick={() => selectAll(app.id, allSelected ? [] : app.features.map(f => f.id))}>
@@ -30,6 +31,7 @@ export default function ReferenceApps({ apps, selections, custom, disabled, sele
         <span className="studio-reference-footer"><span>{summarized ? `${app.features.length} features to explore` : "Feature summary pending"}</span><span>{ready ? (allSelected ? "Clear selection" : "Select all features") : summarized ? "No eligible features" : "Awaiting feature summary"}<Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} /></span></span>
       </button>
       <button className="studio-reference-explore" aria-label={`Explore ${app.name}`} aria-expanded={open} aria-controls={`reference-${app.id}`} onClick={() => setExpanded(open ? null : app.id)}>{open ? "Close details" : "Explore features"}<Icon name={open ? "ChevronUp" : "ArrowUpRight"} size={18} /></button>
+      {fit.level === "review" && <p className="studio-note">Needs review: {fit.reason}</p>}
       {matches?.(app).length ? <p className="studio-note studio-feature-match">Listing mentions: {matches(app).join(" · ")}</p> : null}
       {open && <div id={`reference-${app.id}`} className="studio-reference-detail">
         <div className="studio-reference-detail-head"><div><h4>A closer look</h4><p>Screenshots from Google Play</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={13} /></a></div>

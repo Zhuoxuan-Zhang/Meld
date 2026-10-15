@@ -15,7 +15,7 @@ const MAX_ACTIVE = 2;
 
 // Apps in a scan whose listing has not been summarized yet. Scans saved before
 // listings were collected have no description and are rescanned instead.
-export const unsummarized = (result: MarketResult, includeReview = false) =>
+export const unsummarized = (result: MarketResult, includeReview = true) =>
   result.apps.filter(
     (a) => !a.retained && !a.listedFeatures && a.description !== undefined && (assessFit(a, result.domain).level === "simple" || includeReview && assessFit(a, result.domain).level === "review"),
   );
@@ -33,7 +33,7 @@ export function useListedFeatures(
   domains: string[],
   market: Record<string, MarketResult> | undefined,
   onFeatures: (features: Record<string, ListedFeatures>) => void,
-  includeReview = false,
+  includeReview = true,
 ) {
   const [connection, setConnection] = useState<FeatureConnection | null>(null);
   const [states, setStates] = useState<Record<string, FeatureState>>({});

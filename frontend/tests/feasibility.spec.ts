@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
-import { assessFit, featureFitsScope, recommendedDomains } from "../src/feasibility";
+import { assessFit, featureFitsScope, fitsFilter, recommendedDomains } from "../src/feasibility";
+import { unsummarized } from "../src/useFeatures";
 import { fromScannerReport, scanPlan } from "../src/market";
 import { catalog, emptyDraft, loadDraft } from "../src/state";
 import { scannerApp, scannerReport } from "./market-data";
@@ -60,6 +61,52 @@ test("complex dependencies are excluded and missing evidence needs review", () =
   expect(featureFitsScope("Local search", "Find saved notes")).toBe(true);
 });
 
+test("classic games qualify without mistaking absent features or pricing for complexity", () => {
+  for (const title of ["Minesweeper", "Minesweeper Classic: Offline", "Sudoku", "2048", "Tic-tac-toe"]) {
+    expect(assessFit({ title, summary: "A classic puzzle with local stats." }, "Puzzle games").level, title).toBe("simple");
+  }
+  const infinity = assessFit({ title: "Infinity Sweep: Minesweeper", summary: "Endless minesweeper, infinite zones. No pop-up ads, no timers—sweep forever." }, "Minesweeper games");
+  expect(infinity.level).toBe("simple");
+  expect(infinity.scope).toEqual(["Reveal cells, flag mines and track wins locally"]);
+  for (const description of ["Reveal a bomb hidden with 3D Touch.", "Beveled 3D cells and traditionally colored numbers.", "No multiplayer. Play offline.", "Optional items require payment. Payment will be charged to your account."]) {
+    expect(assessFit({ title: "Minesweeper", summary: "A classic puzzle", description }).level, description).toBe("simple");
+  }
+  for (const summary of ["Online multiplayer matches", "Explore a 3D world", "Accept payments from players"]) {
+    expect(assessFit({ title: "Minesweeper", summary }).level, summary).toBe("complex");
+  }
+  expect(assessFit({ title: "Puzzle Fun", summary: "Funny puzzles", description: "Optional items require payment." }).level).toBe("review");
+  expect(assessFit({ title: "Wallet", summary: "Manage payments" }).level).toBe("complex");
+  expect(assessFit({ title: "Business app", summary: "Run your business", description: "Accept payments from customers." }).level).toBe("complex");
+  expect(featureFitsScope("Tile style", "Beveled 3D cells")).toBe(true);
+  expect(featureFitsScope("Accept payments", "Charge players for items")).toBe(false);
+  expect(featureFitsScope("Multiplayer", "Play online with friends")).toBe(false);
+});
+
+test("unknown workflows remain visible and get summaries unless the user chooses simple only", () => {
+  const review = assessFit({ title: "Puzzle Fun", summary: "Funny puzzles" });
+  expect(review.level).toBe("review");
+  expect(fitsFilter(review)).toBe(true);
+  expect(fitsFilter(review, "simple")).toBe(false);
+  const rows = [
+    { ...scannerApp(0), title: "Puzzle Fun", store_summary: "Funny puzzles", store_description: "Solve a puzzle" },
+    { ...scannerApp(1), title: "Minesweeper", store_summary: "A classic puzzle", store_description: "Reveal cells and flag mines" },
+    { ...scannerApp(2), title: "Online Puzzle", store_summary: "Multiplayer battles", store_description: "Play online" },
+  ];
+  const result = fromScannerReport("Puzzle games", { ...scannerReport("Puzzle games"), ranking: rows });
+  expect(unsummarized(result).map(a => a.title)).toEqual(["Puzzle Fun", "Minesweeper"]);
+  expect(unsummarized(result, false).map(a => a.title)).toEqual(["Minesweeper"]);
+  const previous = globalThis.localStorage;
+  try {
+    for (const complexity of [undefined, "simple", "review"] as const) {
+      const draft = { ...emptyDraft(), domains: ["Puzzle games"], market: { "Puzzle games": result }, complexity };
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify(draft) } });
+      const loaded = loadDraft();
+      expect(loaded.complexity).toBe(complexity || "review");
+      expect(catalog(loaded)).toHaveLength(complexity === "simple" ? 1 : 2);
+    }
+  } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, value: previous }); }
+});
+
 test("six domain choices allow two selections and never show samples offline", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".studio-domain-grid button")).toHaveCount(recommendedDomains.length);
@@ -71,9 +118,9 @@ test("six domain choices allow two selections and never show samples offline", a
   await page.getByRole("button", { name: "Explore selected domains" }).click();
   await expect(page.getByText("Disabled for this test.", { exact: false })).toBeVisible();
   await expect(page.locator(".studio-reference-card")).toHaveCount(0);
-  await expect(page.getByLabel("App complexity")).toHaveValue("simple");
+  await expect(page.getByLabel("App complexity")).toHaveValue("review");
   await page.reload();
-  await expect(page.getByLabel("App complexity")).toHaveValue("simple");
+  await expect(page.getByLabel("App complexity")).toHaveValue("review");
   await expect(page.locator(".studio-reference-card")).toHaveCount(0);
 });
 
@@ -110,12 +157,16 @@ for (const example of addedDomains) {
     await page.goto("/");
     await page.getByRole("button", { name: new RegExp(`^${example.domain}`) }).click();
     await page.getByRole("button", { name: "Explore selected domains" }).click();
+    await expect(page.locator(".studio-reference-card")).toHaveCount(2);
+    await expect(page.locator(".studio-reference-card", { hasText: "Focus Timer" })).toContainText("Needs review:");
+    await page.getByLabel("App complexity").selectOption("simple");
     await expect(page.locator(".studio-reference-card")).toHaveCount(1);
     await expect(page.locator(".studio-reference-card h3")).toHaveText(example.title);
     const select = page.getByRole("button", { name: `Select all features from ${example.title}`, exact: true });
     await select.click();
     await expect(page.getByRole("button", { name: `Clear all features from ${example.title}`, exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.reload();
+    await expect(page.getByLabel("App complexity")).toHaveValue("simple");
     await expect(page.getByRole("button", { name: `Clear all features from ${example.title}`, exact: true })).toHaveAttribute("aria-pressed", "true");
     await page.getByLabel("App complexity").selectOption("review");
     await expect(page.locator(".studio-reference-card")).toHaveCount(2);
@@ -148,6 +199,8 @@ test("catalog filter never lets a complex app into the simple selection", async 
   await page.goto("/");
   await page.getByRole("button", { name: /^Notes & lists/ }).click();
   await page.getByRole("button", { name: "Explore selected domains" }).click();
+  await expect(page.locator(".studio-reference-card")).toHaveCount(11);
+  await page.getByLabel("App complexity").selectOption("simple");
   await expect(page.locator(".studio-reference-card")).toHaveCount(10);
   await page.getByLabel("App complexity").selectOption("review");
   await expect(page.locator(".studio-reference-card")).toHaveCount(11);
