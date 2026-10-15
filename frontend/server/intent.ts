@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { z, WorkbenchError } from "../../pipeline/dist/src/integration.js";
 import { modelJson } from "../../backend/src/model";
@@ -17,7 +18,10 @@ export const IntentOutput = z.object({
 type Clarify = (input: z.infer<typeof IntentInput>) => Promise<IntentReply>;
 export function intentApi(directory: string, clarify?: Clarify, probe = () => spawnSync("codex", ["login", "status"], { timeout: 5000, stdio: "ignore" }).status === 0): ApiPlugin {
   let active = 0;
-  const run: Clarify = clarify || (input => modelJson(path.join(directory, "intent"), "clarify", `Help the user define a NEW custom Android app that Meld will design and build for them. Google Play search finds reference apps whose features can inform that new app; it is not a recommendation service for choosing an existing app to install. This build intent is already established: do not ask the user to choose between building and finding an existing app, and never put an assumption that they want an existing app instead of a new build in the plan. Ask one or two focused questions at a time, at most three. Resolve who it is for, the main task, desired feature behavior and essential scope limits. Build on previous answers; never repeat an answered question unless a later answer creates a material contradiction. Resolve conflicting audience or task answers with a short follow-up instead of treating an ambiguous latest answer as confirmation. A vague topic such as gaming needs clarification; a precise brief can go straight to a plan. After two rounds prefer a concrete small scope with explicit assumptions unless a material contradiction remains. Never perform a search or invent apps/evidence. Questions have short optional choices, but free text is always allowed. Return either questions with plan=null, or no questions and a plan for the USER TO CONFIRM. The plan must preserve explicit wishes and note unsupported complex requirements in exclusions/assumptions for confirmation. Favor local single-user workflows; do not silently turn multiplayer or cloud requests into offline apps. Use one or two focused domain labels (reuse the supplied domains where relevant), and 2–4 varied English Google Play queries per topic based on concrete desired features, not just categories. Each feature needs 2–5 specific listing search terms/synonyms for transparent local relevance ranking. Do not use generic terms like app, easy, best, user, tool as match terms.`, input, IntentOutput, 2500, "low", 120000));
+  const run: Clarify = clarify || (async input => {
+    const instructions = await readFile(new URL("../prompts/idea-clarification/prompt.md", import.meta.url), "utf8");
+    return modelJson(path.join(directory, "intent"), "clarify", instructions, input, IntentOutput, 2500, "low", 120000);
+  });
   const install: ApiPlugin["configureServer"] = server => { server.middlewares.use(async (req, res, next) => {
     if (!req.url?.startsWith("/api/intent/")) return next();
     try {
