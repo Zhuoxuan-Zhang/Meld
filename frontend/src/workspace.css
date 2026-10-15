@@ -42,14 +42,18 @@
 .studio-selection-layout .studio-reference-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
 }
+.studio-reference-panel .studio-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
 .studio-mix-panel .studio-feature-mix { border: 0; padding-top: 0; margin: 0 0 24px; }
 .studio-mix-panel .studio-form-grid { grid-template-columns: 1fr; }
 .studio-mix-panel .studio-inline { flex-wrap: wrap; }
 .studio-mix-panel .studio-inline > input { flex: 1 1 10rem; min-width: 0; }
 .studio-mix-panel > .studio-button { width: 100%; }
 .studio-mix-panel > .studio-button svg { flex-shrink: 0; }
-@container workspace (min-width: 58rem) {
-  .studio-selection-layout { grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); }
+@container workspace (min-width: 48rem) {
+  /* Reserve usable space for the mixer before sizing the reference list. */
+  .studio-selection-layout { grid-template-columns: minmax(0, 1fr) minmax(20rem, 30%); }
   .studio-selection-layout > .studio-mix-panel {
     position: sticky;
     top: var(--layout-gap);
