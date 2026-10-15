@@ -1,10 +1,7 @@
 import { test as base, expect } from "@playwright/test";
 
-// UI tests run against the curated sample catalog unless a test routes the
-// market endpoints itself (later routes take precedence). This keeps them
-// independent of Google Play and of whether the scanner is installed. Claude
-// Code feature summaries are off the same way, and Google Play images are
-// served locally.
+// External scans and model summaries are disabled unless a test supplies real-
+// shaped responses. Missing providers must never produce preset app cards.
 const pixel = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
@@ -12,7 +9,6 @@ const pixel = Buffer.from(
 export const test = base.extend<{ offlineMarket: void }>({
   offlineMarket: [
     async ({ page }, use) => {
-      await page.addInitScript(() => { (window as typeof window & { __MELD_LEGACY__?: boolean }).__MELD_LEGACY__ = true; });
       await page.route("**/api/market/**", (route) =>
         route.request().url().endsWith("/api/market/status")
           ? route.fulfill({
@@ -33,6 +29,9 @@ export const test = base.extend<{ offlineMarket: void }>({
               json: { error: "Claude Code is not available." },
             }),
       );
+      await page.route("**/api/projects", route => route.fulfill({ json: { projects: [] } }));
+      await page.route("**/api/status", route => route.fulfill({ json: { available: false } }));
+      await page.route("**/api/design/status", route => route.fulfill({ json: { available: false, exampleId: null, referenceFilesConfigured: false } }));
       await page.route("https://play-lh.googleusercontent.com/**", (route) =>
         route.fulfill({ contentType: "image/png", body: pixel }),
       );

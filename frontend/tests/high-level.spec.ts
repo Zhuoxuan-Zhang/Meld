@@ -53,7 +53,7 @@ test("browser edits the fast design and reaches the app without waiting for a de
   const api = await projectServer({ highLevel: async (_project, _directory, request) => ({ document: request ? { ...structuredClone(request.document), appearance: "Blue accents." } : structuredClone(document), response: "Ready to review." }) });
   try {
     await page.route("**/api/**", async route => { const request = route.request(), url = new URL(request.url()); const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined }); await route.fulfill({ response }); });
-    await page.goto("/"); await page.getByLabel("Describe your app", { exact: true }).fill(idea.input); await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("Search topic", { exact: true }).fill("Productivity"); await page.getByRole("button", { name: "Explore ideas", exact: true }).click(); await page.getByRole("button", { name: "Confirm features and generate design" }).click();
+    const project = await createOutline(api); await page.goto(`/?project=${project.id}`);
     await expect(page.getByLabel("High-level design")).toBeVisible(); expect(api.counts().analysisCalls).toBe(0);
     const title = page.getByRole("button", { name: "Edit App title", exact: true });
     await title.click(); await expect(page.getByLabel("App title", { exact: true })).toHaveCount(0);

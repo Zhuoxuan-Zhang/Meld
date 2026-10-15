@@ -1,3 +1,4 @@
+import type { SearchTopic } from "./intent";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseMarketResult } from "./market";
 import type { MarketResult } from "./market";
@@ -17,7 +18,13 @@ export function useMarket(
   domains: string[],
   market: Record<string, MarketResult> | undefined,
   onResult: (domain: string, result: MarketResult) => void,
+  topics?: SearchTopic[],
 ) {
+  const topicKey = JSON.stringify(topics || []);
+  const queryPlans = useRef(topics);
+  queryPlans.current = topics;
+  const context = useRef(topicKey);
+  context.current = topicKey;
   const [connection, setConnection] = useState<MarketConnection | null>(null);
   const [scans, setScans] = useState<Record<string, ScanState>>({});
   const requests = useRef(new Map<string, AbortController>());
@@ -83,6 +90,7 @@ export function useMarket(
   };
   const scan = useCallback(async (domain: string, refresh = false) => {
     requests.current.get(domain)?.abort();
+    const requestContext = context.current;
     const controller = new AbortController();
     requests.current.set(domain, controller);
     settle(domain, { phase: "scanning", startedAt: Date.now(), queued: true });
@@ -98,7 +106,7 @@ export function useMarket(
       const res = await fetch("/api/market/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain, refresh }),
+        body: JSON.stringify({ domain, refresh, queries: queryPlans.current?.find(t => t.domain === domain)?.queries }),
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
@@ -109,7 +117,7 @@ export function useMarket(
             : "The market scan failed. Please try again.";
       else {
         const result = parseMarketResult(data.result);
-        if (!controller.signal.aborted) deliver.current(domain, result);
+        if (!controller.signal.aborted && requestContext === context.current && requests.current.get(domain) === controller) deliver.current(domain, result);
       }
     } catch {
       failure =
@@ -126,6 +134,10 @@ export function useMarket(
     requests.current.delete(domain);
     settle(domain, failure ? { phase: "error", message: failure } : undefined);
   }, [settle]);
+  useEffect(() => {
+    requests.current.forEach(c => c.abort()); requests.current.clear();
+    upgraded.current.clear(); setScans({});
+  }, [topicKey]);
   // Start scans for new domains; stop scans for removed ones.
   useEffect(() => {
     if (!connection?.available) return;
@@ -134,11 +146,11 @@ export function useMarket(
       const outdated =
         !!result &&
         !upgraded.current.has(domain) &&
-        result.apps.some(
+        (!result.scanId || result.apps.some(
           (a) =>
             !a.retained &&
             (a.description === undefined || a.iconUrl === undefined),
-        );
+        ));
       if ((!result || outdated) && !scans[domain] && !requests.current.has(domain)) {
         if (outdated) upgraded.current.add(domain);
         scan(domain);

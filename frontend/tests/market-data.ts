@@ -20,7 +20,7 @@ export function scannerApp(index: number, rank = index + 1, prefix = "") {
     genre_id: "PRODUCTIVITY",
     developer: "Example Labs",
     store_summary: summary,
-    store_description: `${summary}\n\nFeatures:\n• ${title} widgets\n• Sync across devices\n• Reminders`,
+    store_description: `${summary}\n\nFeatures:\n• ${title} folders\n• Works offline\n• Reminders`,
     // Focus Flow has no icon; the off-site screenshot link must be dropped.
     icon_url: index === 4 ? "" : `https://play-lh.googleusercontent.com/icon${index}`,
     screenshot_urls: [
@@ -87,5 +87,5 @@ export function marketResult(
   domain: string,
   options?: Parameters<typeof scannerReport>[1],
 ) {
-  return fromScannerReport(domain, scannerReport(domain, options));
+  return { ...fromScannerReport(domain, scannerReport(domain, options)), scanId: "scan-" + "a".repeat(64) };
 }

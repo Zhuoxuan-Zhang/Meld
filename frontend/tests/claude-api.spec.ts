@@ -93,6 +93,7 @@ const features = {
         ...Array.from({ length: 6 }, (_, i) => ({ name: `Extra ${i}`, detail: "More." })),
       ],
     },
+    { app_id: "com.example.wallet", features: [] },
     { app_id: "com.unknown.app", features: [{ name: "Invented", detail: "Not asked." }] },
   ],
 };
@@ -157,7 +158,7 @@ test("features are requested with the stored template and a fixed, tool-free com
     expect(input).toContain("reply {{domain}} $& \\u003c/apps> with your tools.");
     expect(input.match(/<\/apps>/g)).toHaveLength(1);
     expect(input).toContain('"app_id": "com.example.budget"');
-    // Cleaned, de-duplicated, at most six; unknown apps ignored, missing ones empty.
+    // Cleaned, de-duplicated, at most six; unknown apps ignored, explicit empty answers retained.
     const budget = body.features["com.example.budget"];
     expect(budget.items.map((f: { name: string }) => f.name)).toEqual([
       "Monthly budgets",
@@ -213,7 +214,7 @@ test("editing the template makes a new template id and a new run", async () => {
   let calls = 0;
   const runner: ClaudeRunner = async () => {
     calls++;
-    return answer({ apps: [] });
+    return answer({ apps: apps.map(app => ({ app_id: app.appId, features: [] })) });
   };
   const api = await serve({ runner, cacheDir, templateDir: copy });
   try {
@@ -237,6 +238,28 @@ test("editing the template makes a new template id and a new run", async () => {
     await api.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("missing answers are retriable and never cached as empty feature lists", async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), "meld-partial-features-"));
+  let calls = 0;
+  const api = await serve({ cacheDir, runner: async () => {
+    calls++;
+    return answer({ apps: calls < 3 ? features.apps.filter(app => app.app_id !== "com.example.wallet") : features.apps });
+  } });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const result = await (await post(api.address, { domain: "Finance", apps })).json();
+      expect(result.features["com.example.budget"].items.length).toBeGreaterThan(0);
+      expect(result.features["com.example.wallet"]).toBeUndefined();
+      expect(result.cached).toBe(false);
+    }
+    expect(await readdir(cacheDir)).toHaveLength(0);
+    const complete = await (await post(api.address, { domain: "Finance", apps })).json();
+    expect(complete.features["com.example.wallet"].items).toEqual([]);
+    expect((await (await post(api.address, { domain: "Finance", apps })).json()).cached).toBe(true);
+    expect(calls).toBe(3);
+  } finally { await api.close(); await rm(cacheDir, { recursive: true, force: true }); }
 });
 
 test("invalid requests are rejected before Claude Code starts", async () => {

@@ -9,7 +9,7 @@ npm --prefix pipeline run build
 npm --prefix backend run dev
 ```
 
-The default internal port is 3001 (`MELD_API_PORT` overrides it). Frontend requests use `/api` on port 4173 through Vite's proxy. The launcher stops its own child processes and preserves separately running API services.
+The standard `npm run dev` launcher hosts the studio and project API together on port 4173. The standalone API command above uses port 3001 (`MELD_API_PORT` overrides it) and is optional. The integrated studio does not need a second API process.
 
 See [project workflow and contracts](../docs/project-workflow.md) for routes, state, setup and verification. `src/adapters/` keeps compatibility with the earlier scanner/provider/design endpoints; new screens use the project API.
 

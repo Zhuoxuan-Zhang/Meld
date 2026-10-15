@@ -1,3 +1,4 @@
+import { assessFit } from "./feasibility";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseListedFeatures } from "./market";
 import type { ListedFeatures, MarketApp, MarketResult } from "./market";
@@ -14,9 +15,9 @@ const MAX_ACTIVE = 2;
 
 // Apps in a scan whose listing has not been summarized yet. Scans saved before
 // listings were collected have no description and are rescanned instead.
-export const unsummarized = (result: MarketResult) =>
+export const unsummarized = (result: MarketResult, includeReview = false) =>
   result.apps.filter(
-    (a) => !a.retained && !a.listedFeatures && a.description !== undefined,
+    (a) => !a.retained && !a.listedFeatures && a.description !== undefined && (assessFit(a, result.domain).level === "simple" || includeReview && assessFit(a, result.domain).level === "review"),
   );
 const request = (a: MarketApp) => ({
   appId: a.appId,
@@ -32,6 +33,7 @@ export function useListedFeatures(
   domains: string[],
   market: Record<string, MarketResult> | undefined,
   onFeatures: (features: Record<string, ListedFeatures>) => void,
+  includeReview = false,
 ) {
   const [connection, setConnection] = useState<FeatureConnection | null>(null);
   const [states, setStates] = useState<Record<string, FeatureState>>({});
@@ -95,7 +97,7 @@ export function useListedFeatures(
   };
   const summarize = useCallback(
     async (domain: string, result: MarketResult) => {
-      const apps = unsummarized(result).slice(0, 8);
+      const apps = unsummarized(result, includeReview).slice(0, 8);
       if (!apps.length) return;
       requests.current.get(domain)?.abort();
       const controller = new AbortController();
@@ -152,7 +154,7 @@ export function useListedFeatures(
       requests.current.delete(domain);
       settle(domain, failure ? { phase: "error", ...base, message: failure } : undefined);
     },
-    [settle],
+    [settle, includeReview],
   );
   // Summarize new scans; stop work for removed domains. A failure is retried
   // automatically only when a new scan replaces the one that failed.
@@ -163,7 +165,7 @@ export function useListedFeatures(
       const state = states[domain];
       if (
         result &&
-        unsummarized(result).length &&
+        unsummarized(result, includeReview).length &&
         !requests.current.has(domain) &&
         (!state || state.generatedAt !== result.generatedAt)
       )
@@ -176,7 +178,7 @@ export function useListedFeatures(
       }
     for (const domain of Object.keys(states))
       if (!domains.includes(domain)) settle(domain);
-  }, [connection, domains, market, states, summarize, settle]);
+  }, [connection, domains, market, states, summarize, settle, includeReview]);
   const retry = useCallback(
     (domain: string) => {
       const result = market?.[domain];

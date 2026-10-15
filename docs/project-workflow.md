@@ -12,9 +12,9 @@ npm run build
 npm test
 ```
 
-Development serves the frontend at **http://127.0.0.1:4173** and the backend at **http://127.0.0.1:3001**. Vite proxies `/api` to the backend, so the browser uses one address. Set `MELD_API_PORT` in `frontend/.env.local` if 3001 is occupied; this workspace uses **3101**. `npm --prefix backend run dev` starts the API alone. Production should serve static frontend files and proxy `/api` through one HTTPS domain; 3001 is an internal port.
+Development serves the integrated studio and project API at **http://127.0.0.1:4173**. Vite installs the project API directly, so no second server is required. `npm --prefix backend run dev` remains available for an optional standalone API on port 3001 (`MELD_API_PORT` overrides it). Production should serve static frontend files and the API through one HTTPS domain.
 
-`frontend/` contains React and its typed API client. `backend/` owns HTTP routes, profiles, jobs, research and builds. `pipeline/` contains the existing analysis/design engine. `shared/` contains public contracts and catalog normalization. Compatibility exports and provider endpoints remain for existing integrations; the old four-step UI is available at `/?legacy=1`. The default UI does not call provider-specific APIs.
+`frontend/` contains React and its typed API client. `backend/` owns HTTP routes, profiles, jobs, research and builds. `pipeline/` contains the existing analysis/design engine. `shared/` contains public contracts and catalog normalization. Compatibility exports and provider endpoints remain for existing integrations. Old routes open the current studio. Discovery uses the market and intent APIs, then imports selected references into the project API for review and delivery.
 
 ## Saved state and progress
 

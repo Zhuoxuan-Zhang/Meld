@@ -49,6 +49,27 @@ const ok = (report: unknown) => async () => ({ code: 0, report, stderr: "" });
 const domainOf = (args: string[]) =>
   args.find((a) => a.startsWith("--category="))!.slice("--category=".length);
 
+test("feature queries span categories, preserve provenance, and use a separate cache", async ({ request }) => {
+  const calls: string[][] = [];
+  const cacheDir = await mkdtemp(path.join(tmpdir(), "meld-feature-search-"));
+  const runner: ScanRunner = async args => { calls.push(args); return { code: 0, report: scannerReport("Notes & lists"), stderr: "" }; };
+  let api = await serve({ runner, cacheDir });
+  try {
+    const body = { domain: "Notes & lists", queries: ["offline study notes", "plain text quick capture"] };
+    const first = await (await request.post(api.address + "/api/market/scan", { data: body })).json();
+    expect(first.result.queries).toEqual(body.queries);
+    expect(calls[0]).toContain("--query=offline study notes");
+    expect(calls[0].some(a => a.startsWith("--genre-id="))).toBe(false);
+    await api.close(); api = await serve({ runner, cacheDir });
+    const cached = await (await request.post(api.address + "/api/market/scan", { data: body })).json();
+    expect(cached.cached).toBe(true); expect(cached.result.queries).toEqual(body.queries); expect(calls).toHaveLength(1);
+    await request.post(api.address + "/api/market/scan", { data: { domain: body.domain, queries: ["flashcards"] } });
+    expect(calls).toHaveLength(2);
+    expect((await request.post(api.address + "/api/market/scan", { data: { ...body, queries: [42] } })).status()).toBe(400);
+    expect((await request.post(api.address + "/api/market/scan", { data: { ...body, queries: [] } })).status()).toBe(400);
+  } finally { await api.close(); await rm(cacheDir, { recursive: true, force: true }); }
+});
+
 test("a scan is sent with the domain's search plan and returns normalized apps, then the cache", async ({
   request,
 }) => {
@@ -79,7 +100,7 @@ test("a scan is sent with the domain's search plan and returns normalized apps, 
         "--query=to do list",
         "--query=notes",
         "--query=focus timer",
-        "--max-candidates=30",
+        "--max-candidates=90",
       ],
     ]);
     expect(body.result).toMatchObject({
@@ -118,7 +139,7 @@ test("a scan is sent with the domain's search plan and returns normalized apps, 
       storeUrl:
         "https://play.google.com/store/apps/details?id=com.example.calendar&hl=en&gl=us",
       description:
-        "Plan your day with tasks, reminders and a focus timer.\n\nFeatures:\n• Calendar Pro widgets\n• Sync across devices\n• Reminders",
+        "Plan your day with tasks, reminders and a focus timer.\n\nFeatures:\n• Calendar Pro folders\n• Works offline\n• Reminders",
       iconUrl: "https://play-lh.googleusercontent.com/icon0",
       // Only Google Play's image server is allowed.
       screenshots: [
@@ -173,7 +194,7 @@ test("custom domains are sent as a search topic without a genre filter", async (
       data: { domain: "  Gardening " },
     });
     expect(res.status()).toBe(200);
-    expect(sent).toEqual(["--category=Gardening", "--max-candidates=30"]);
+    expect(sent).toEqual(["--category=Gardening", "--max-candidates=90"]);
     expect((await res.json()).result.domain).toBe("Gardening");
   } finally {
     await api.close();
@@ -257,7 +278,7 @@ test("a missing scanner and scanner failures produce safe, specific errors", asy
     ],
     [async () => ({ code: 1, report: null, stderr: "boom" }), 502, "could not run"],
     [
-      ok({ ...scannerReport("Finance"), top_five: [{ app_id: "bad id" }] }),
+      ok({ ...scannerReport("Finance"), ranking: [{ app_id: "bad id" }] }),
       502,
       "unexpected report",
     ],

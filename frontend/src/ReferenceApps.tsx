@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "./icons";
-import { formatInstalls, sizedImage } from "../../shared/market";
-import type { ReferenceApp } from "../../shared/catalog";
+import { formatInstalls, sizedImage } from "./market";
+import type { ReferenceApp } from "./data";
 import type { FeatureRequest } from "../../shared/contracts";
 
 export function ReferenceIcon({ app, small = false }: { app: ReferenceApp; small?: boolean }) {
@@ -15,29 +15,31 @@ function ReferenceScreenshots({ app }: { app: ReferenceApp }) {
   if (!screenshots.length) return <p className="studio-note">Screenshots aren’t available for this app.</p>;
   return <div className="studio-reference-screenshots" role="region" aria-label={`${app.name} store screenshots`} tabIndex={0}>{screenshots.map((url, index) => <img key={url} src={sizedImage(url, "h560")} alt={`${app.name} screenshot ${index + 1}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(current => [...current, url])} />)}</div>;
 }
-type Props = { apps: ReferenceApp[]; selections: Record<string, string[]>; custom: FeatureRequest[]; disabled: boolean; select: (app: string, feature: string, checked: boolean) => void; customize: (app: string, feature: FeatureRequest) => void; selectAll: (app: string, ids: string[]) => void };
-export default function ReferenceApps({ apps, selections, custom, disabled, select, customize, selectAll }: Props) {
+type Props = { apps: ReferenceApp[]; selections: Record<string, string[]>; custom: FeatureRequest[]; disabled: boolean; select: (app: string, feature: string, checked: boolean) => void; customize: (app: string, feature: FeatureRequest) => void; selectAll: (app: string, ids: string[]) => void; matches?: (app: ReferenceApp) => string[] };
+export default function ReferenceApps({ apps, selections, custom, disabled, select, customize, selectAll, matches }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return <div className="studio-reference-grid">{apps.map((app, index) => {
-    const open = expanded === app.id, selected = selections[app.id] || [];
+    const open = expanded === app.id, selected = selections[app.id] || [], summarized = Boolean(app.market?.listedFeatures), ready = summarized && app.features.length > 0, allSelected = ready && app.features.every(f => selected.includes(f.id));
     return <article className={`studio-market-app studio-reference-card${open ? " is-open" : ""}${selected.length ? " has-selection" : ""}`} key={app.id} aria-label={`Reference app: ${app.name}`}>
-      <button className="studio-reference-toggle" aria-label={`Explore ${app.name}`} aria-expanded={open} aria-controls={`reference-${app.id}`} onClick={() => setExpanded(open ? null : app.id)}>
+      <button className="studio-reference-toggle" aria-label={`${allSelected ? "Clear" : "Select"} all features from ${app.name}`} aria-pressed={allSelected} disabled={disabled || !ready} onClick={() => selectAll(app.id, allSelected ? [] : app.features.map(f => f.id))}>
         <span className="studio-reference-top"><ReferenceIcon app={app} /><span className="studio-reference-rank">Reference {String(index + 1).padStart(2, "0")}</span>{selected.length > 0 && <span className="studio-reference-selected"><Icon name="Check" size={12} />{selected.length} selected</span>}</span>
-        <span className="studio-reference-name"><h3>{app.name}</h3><Icon name={open ? "ChevronUp" : "ArrowUpRight"} size={18} /></span>
+        <span className="studio-reference-name"><h3>{app.name}</h3><Icon name={allSelected ? "CircleCheck" : "CirclePlus"} size={18} /></span>
         <span className="studio-reference-description">{app.tagline}</span>
         <span className="studio-reference-metrics"><span><Icon name="Star" size={12} />{app.market?.rating == null ? "Not rated" : app.market.rating.toFixed(1)}</span><span>{formatInstalls(app.market?.installs || 0)} installs</span><span>Signal {app.market?.score}/15</span></span>
         <span className="studio-reference-tags">{app.features.slice(0, 2).map(feature => <span key={feature.id}>{custom.find(item => item.id === feature.id)?.name || feature.name}</span>)}{app.features.length > 2 && <span>+{app.features.length - 2}</span>}</span>
-        <span className="studio-reference-footer"><span>{app.features.length} features to explore</span><span>{open ? "Close details" : "Choose features"}<Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} /></span></span>
+        <span className="studio-reference-footer"><span>{summarized ? `${app.features.length} features to explore` : "Feature summary pending"}</span><span>{ready ? (allSelected ? "Clear selection" : "Select all features") : summarized ? "No eligible features" : "Awaiting feature summary"}<Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} /></span></span>
       </button>
+      <button className="studio-reference-explore" aria-label={`Explore ${app.name}`} aria-expanded={open} aria-controls={`reference-${app.id}`} onClick={() => setExpanded(open ? null : app.id)}>{open ? "Close details" : "Explore features"}<Icon name={open ? "ChevronUp" : "ArrowUpRight"} size={18} /></button>
+      {matches?.(app).length ? <p className="studio-note studio-feature-match">Listing mentions: {matches(app).join(" · ")}</p> : null}
       {open && <div id={`reference-${app.id}`} className="studio-reference-detail">
         <div className="studio-reference-detail-head"><div><h4>A closer look</h4><p>Screenshots from Google Play</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={13} /></a></div>
         <ReferenceScreenshots app={app} />
-        <div className="studio-reference-detail-head"><div><h4>Choose what belongs in your app</h4><p>{app.market?.listedFeatures ? "Ideas from the store description" : "Feature suggestions matched from listing keywords"}</p></div><div className="studio-reference-bulk"><button disabled={disabled || !app.features.length || app.features.every(feature => selected.includes(feature.id))} onClick={() => selectAll(app.id, app.features.map(feature => feature.id))}>Select all</button><button disabled={disabled || !selected.length} onClick={() => selectAll(app.id, [])}>Clear</button></div></div>
+        <div className="studio-reference-detail-head"><div><h4>Choose what belongs in your app</h4><p>{app.market?.listedFeatures ? "Ideas from the store description" : "Waiting for a completed listing summary"}</p></div><div className="studio-reference-bulk"><button disabled={disabled || !app.features.length || app.features.every(feature => selected.includes(feature.id))} onClick={() => selectAll(app.id, app.features.map(feature => feature.id))}>Select all</button><button disabled={disabled || !selected.length} onClick={() => selectAll(app.id, [])}>Clear</button></div></div>
         <div className="studio-feature-picks">{app.features.map(feature => {
           const override = custom.find(item => item.id === feature.id), value = override || feature;
           return <div className={`studio-feature-choice${selected.includes(feature.id) ? " is-selected" : ""}`} key={feature.id}><label><input type="checkbox" checked={selected.includes(feature.id)} disabled={disabled} onChange={event => select(app.id, feature.id, event.target.checked)} /><span><strong>{value.name}</strong><small>{value.description}</small>{override && <em>Customized for your app</em>}</span></label><details className="studio-feature-edit"><summary>Customize {feature.name}</summary><label>Feature name<input value={value.name} maxLength={120} disabled={disabled} onChange={event => customize(app.id, { id: feature.id, name: event.target.value, description: value.description })} /></label><label>How should it work?<textarea aria-label="How should it work?" value={value.description} rows={3} maxLength={1000} disabled={disabled} onChange={event => customize(app.id, { id: feature.id, name: value.name, description: event.target.value })} /></label></details>{feature.flow && <details className="studio-feature-journey"><summary>See the user journey</summary><p>{feature.flow}</p></details>}</div>;
         })}</div>
-        {!app.features.length && <p className="studio-note">No feature summary is available for this listing. Add your own feature below.</p>}
+        {!app.features.length && <p className="studio-note">{summarized ? "The completed summary contains no features within this app’s scope." : "Features are not ready yet. Check the summary status above or retry the summary."}</p>}
         <p className="studio-note">Store descriptions suggest ideas; they don’t establish verified app behavior.</p>
       </div>}
     </article>;

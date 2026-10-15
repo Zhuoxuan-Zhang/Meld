@@ -3,10 +3,17 @@ import ReactDOM from "react-dom/client";
 import ProjectWorkspace from "./ProjectWorkspace";
 import "@fontsource-variable/inter";
 import "./styles.css";
-const LegacyApp = React.lazy(() => import("./App"));
-const legacy = new URLSearchParams(location.search).has("legacy") || new URLSearchParams(location.search).has("design") || (window as typeof window & { __MELD_LEGACY__?: boolean }).__MELD_LEGACY__;
+
+// Old bookmarks use hash routes. Keep their saved draft and project, but always
+// open the current studio. There is no second discovery or demo workflow.
+if (location.hash.startsWith("#/") || location.pathname === "/legacy") {
+  const url = new URL(location.href);
+  url.pathname = "/";
+  url.hash = "";
+  window.history.replaceState(window.history.state, "", url);
+}
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <React.Suspense fallback={<p role="status">Loading your workspace…</p>}>{legacy ? <LegacyApp /> : <ProjectWorkspace />}</React.Suspense>
+    <ProjectWorkspace />
   </React.StrictMode>,
 );

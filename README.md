@@ -16,7 +16,7 @@ Develop directly from this repository root; there is no nested `repo/` checkout.
 | `docs/` | Design interaction, setup and API contracts |
 | `md/` | Original APK-analysis implementation specification |
 
-With Node 24, run `npm run dev`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner, compiles the pipeline and starts both services. API requests are proxied to internal port 3001 (configurable). See [workflow setup](docs/project-workflow.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
+With Node 24, run `npm run dev`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner, compiles the pipeline and starts the integrated studio and API on that address. See [frontend setup](frontend/README.md), [workflow contracts](docs/project-workflow.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
 
 ## Standalone market scanner
 

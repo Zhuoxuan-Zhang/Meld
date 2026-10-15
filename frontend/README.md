@@ -1,195 +1,147 @@
-# Meld frontend
+# Meld — small app research, design and builds
 
-The default interface is a three-step project workspace: **Describe your app → Review and customize → Get your app**. A persistent sidebar reflects the server-owned app profile, confirmed design revision and build. The frontend calls the project API through its `/api` proxy; research/model orchestration and storage now live in `backend/`. See [project workflow and API contracts](../docs/project-workflow.md).
+Choose domains or describe an idea. Clarify the scope, find reference apps, select features, and review an editable design. Zhuoxuan's coding agent turns the approved design into an Android debug APK. The main workspace follows Zhuoxuan's three-step frontend: Describe your app, Review and customize, Get your app. It keeps our six suggested domains, intent clarification, full eligible app list, whole-card selection, individual feature choices and custom feature requests. Old hash routes and `/legacy` now open this same workspace. The retired four-step pages, preset app catalog, combination form and browser templates have been removed.
 
-Run `npm run dev` from the repository root. Frontend: port 4173. Backend: internal port 3001 (`MELD_API_PORT` can override it).
+## Run
 
-## Earlier studio compatibility mode
-
-The following describes the earlier four-step studio, preserved at `/?legacy=1`. Its provider endpoints and browser-template export remain available for existing integrations. New project screens use the workflow documented above.
-
-The [interactive design document](../docs/design-doc-interaction.md) is now integrated into Review. It supports real pipeline output, a readable English explanation, feature settings and free text, selectable proposals, confirmation, version recovery and approved developer-design exports. It uses the server’s Codex CLI login separately from optional OpenRouter planning. Market results are handed off as server-owned scan IDs; actual APK files are required for the analysis stage.
-
-Choose domains (suggested ones or any words you type), see the hot apps in them from live Google Play market signals with the features their store listings describe, get an AI suggestion for combining features, review the plan, and export an interactive browser demo. You can also select features yourself.
-
-## Run locally
-
-From the repository root, one command sets everything up and opens Meld in your browser:
+From the repository root:
 
 ```sh
 scripts/dev.sh
 ```
 
-It installs the frontend dependencies when they are missing or out of date, sets up the market-signal scanner (new_app_agent) in its own `.venv`, starts the local server at **http://127.0.0.1:4173** and opens it. It is safe to run again: when Meld is already running it just opens the page. The server binds to this computer only; press Control-C to stop it.
-
-| Command | What it does |
-| --- | --- |
-| `scripts/dev.sh` | Set up what is missing, start Meld, open the browser |
-| `scripts/dev.sh --restart` | Replace a Meld server that is already running |
-| `scripts/dev.sh --no-open` | Start without opening the browser |
-| `scripts/dev.sh --check` | Set up, then run the test suite |
-| `MELD_PORT=4180 scripts/dev.sh` | Use another port |
-
-Requirements: Node.js 22.19+ (nvm is loaded automatically when `node` is not on your PATH) and, for market signals, Python 3.10+ or [uv](https://docs.astral.sh/uv/). Without Python, Meld still runs and shows its sample apps.
-
-The same steps by hand, from the repository root:
+Or:
 
 ```sh
-npm --prefix pipeline ci
 cd frontend
 npm ci
 npm run setup:market
+npm run setup:design
+npm run setup:analysis
 npm run dev
 ```
 
-On this Mac, you can also double-click **Start Meld.command**.
+Open **http://127.0.0.1:4173**. `scripts/dev.sh --restart` restarts an existing server. `--no-open` leaves the browser closed. `MELD_PORT=4180 scripts/dev.sh` uses another port. **Start Meld.command** also starts Meld on macOS.
 
-## What works
+Running `scripts/dev.sh` again reuses the active server before setup runs, so reopening Meld does not interrupt a design or build job. Use `--restart` when you intend to restart it.
 
-- Six suggested domains and free-text domains: anything you type is scanned as typed. Only a suggested domain's own name (in any case) becomes that suggested domain. Case-insensitive duplicate detection and input validation.
-- Live market signals: the top five Google Play apps for each chosen domain, including custom ones, with rank, opportunity score, rating, installs, business model and recent review activity. Scans start as soon as a domain is chosen, can be rescanned or retried per domain, and are cached on this computer for 24 hours.
-- App images: each live app shows its real Google Play icon on cards and app pages, and its first four screenshots on its app page. Your browser loads small copies straight from Google's image server (`play-lh.googleusercontent.com`, without sending a referrer); links to any other site are ignored. If an image does not load, the app's first letter is shown instead.
-- Store-listing features: your own Claude Code summarizes each scanned app's Google Play description into three to six high-level features. They are the features you choose from on the app cards and app pages, and they go into `DESIGN.md` and AI suggestions.
-- A fixed collection of 18 sample apps when the scanner is not set up or a scan finds nothing, domain filters, and search by app, developer, store description or feature.
-- Live AI feature combinations through a local OpenRouter endpoint. Each plan includes a concept, feature reasons, and a shared user journey.
-- One-click plan approval, undo, retry, cancellation, and six clearly labeled offline example plans.
-- Feature selection, expandable user journeys, bulk selection, and persistent choices.
-- Separate Select all / Deselect all controls. Catalog actions affect shown apps; the selection panel can clear the whole mix.
-- Search, domain filters, and catalog scroll position survive a trip to an app's detail page.
-- A selection panel, per-app review, and merging repeated features while preserving their sources.
-- App name, audience, purpose, and three visual styles.
-- Interactive preview, opening the demo in a new tab, and downloading a ZIP.
-- README and design document previews and downloads.
-- A complete export: `index.html`, `README.md`, `DESIGN.md`, individual `designs/*.md`, and `project.json`.
-- Keyboard navigation, responsive layouts, readable colors, route guards, and clear empty states.
+Use Node 22.19+ or a supported newer version, Python 3.10+, and a full JDK 17+ for APK analysis. The setup script finds Android Studio's JDK on this Mac. `setup:analysis` installs the backend's pinned REA, JADX and Apktool tools. Its APK/resource smoke check must pass. Market scanning needs network access. Design generation uses the backend's configured model login.
 
-The exported demo supports 16 feature types. These include a focus timer, garden, tasks, habits, notes, breathing, journaling, workouts, goals, flashcards, reading lists, budgets, expenses, idea boards, bookmarks, and progress summaries. The exported `index.html` runs offline without dependencies.
+`setup:design` uses Zhuoxuan's `ab005dd` revision when cloning a missing backend. It applies `patches/meld-workflow.patch` and builds the pipeline. Existing checkout changes are preserved; an incompatible patch fails instead of replacing local work. The patch keeps selected-feature guidance, makes backend paths portable, uses an available Codex model, and preserves approved outline tasks. Meld's `ProjectWorkspace`, inline outline editor, visual reference cards and browser emulator follow this upstream frontend. `StudioDiscovery` adds the domain, intent and feature-search tools. The project API and coding worker run in the same local server.
 
-## Market signals
+## Idea clarification and feature search
 
-Meld's local server runs the new_app_agent scanner (`python -m app_market scan`) for each chosen domain and reads its JSON report. The scanner needs no API key or account; it reads public Google Play listings and reviews, so it needs a network connection. A first scan takes about 5–15 seconds.
+Step 1 still supports selecting or typing up to two domains. **Start with an idea** adds a short agent conversation. Vague ideas receive one or two questions per round. Answers can be selected or typed. The agent returns a scope, audience, desired features, exclusions, assumptions and concrete search phrases. **Confirm and find apps** is required before this idea starts a search. Editing the idea or changing domains cancels a pending response. Ideas, answers and confirmed plans survive reloads. **Explore selected domains** works as soon as one or two domains are selected, even during an unfinished chat. It searches those domains without the chat plan's queries or build instructions. The conversation stays saved. **View app results** returns to the confirmed chat plan and its feature queries. **Use domains only** scrolls to the domain choices without clearing the chat. Switching search routes clears results and feature selections from the previous route so they cannot be mixed.
 
-| Domain | Google Play genre | Search phrases |
+The clarification call uses the existing Codex CLI login at low reasoning effort. It does not search while asking questions. Its prompt and response records are under `.meld-cache/intent/`. Inspired by the question-driven approach in [Grill Me](https://www.aihero.dev/skills-grill-me), with a short app-scoping conversation rather than a long interview.
+
+Confirmed features produce up to four Google Play queries per topic. These queries can span publisher categories. Direct domain scans retain their existing genre filters. Query sets have separate cache entries and are preserved in immutable scan snapshots. Results are deduplicated, then screened by the existing complexity policy. On the app page, listings that mention the planned feature terms rank first; the opportunity score breaks ties. This local ranking is transparent phrase matching over real store text using agent-proposed synonyms. It does not claim semantic verification or hide every unmatched result. `src/relevance.ts` contains this ranking, `server/intent.ts` contains clarification, and `server/market.ts` forwards the search phrases.
+
+## Domain and complexity policy
+
+The default choices are:
+
+| Domain | Scope | Discovery phrases |
 | --- | --- | --- |
-| Productivity | PRODUCTIVITY | to do list, notes, focus timer |
-| Wellness | HEALTH_AND_FITNESS | meditation, mindfulness, mood tracker |
-| Learning | EDUCATION | language learning, flashcards, learn |
-| Finance | FINANCE | budget planner, expense tracker, personal finance |
-| Fitness | HEALTH_AND_FITNESS | workout, fitness tracker, running |
-| Creativity | ART_AND_DESIGN | drawing, graphic design, mood board |
-| Custom tags | none | the tag itself |
+| Notes & lists | Local notes, search and checklists | offline notepad; simple checklist; plain text notes |
+| Focus & habits | Timers, daily check-ins and local progress | pomodoro timer; offline habit tracker; simple focus timer |
+| Journals & diaries | Private dated entries, moods and local history | offline diary; private journal; simple diary |
+| Flashcards | User-made cards, flip/review and local practice | offline flashcards; make your own flashcards; simple flashcards |
+| Reading lists | Manually entered books, reading status and progress | offline book tracker; reading list; reading log |
+| Counters & tallies | Manual tap counts, targets and saved totals | simple tally counter; offline counter; multi counter |
 
-The mapping lives in `src/market.ts`. Each scan collects up to 30 candidates in the US English store.
+During reference discovery, click an app card to select all its features. Click a fully selected card again to clear them. The arrow expands screenshots and individual feature choices. You can also customize a feature or add your own request. Partial selections are marked. Live cards cannot be selected until their feature summaries are ready.
 
-**Selectable features come from the store listing.** Once Claude Code has summarized an app's listing, its features are the choices. Until then, or without Claude Code, an app offers only Meld's sample features whose words appear in its title or summary, so a game never shows note-taking features; an app whose listing mentions none shows no features. Sample features you already chose stay when the summary arrives. The browser demo builds only Meld's built-in features: a chosen listing feature appears in the demo as described but not built, and `DESIGN.md` marks its user journey as still to be designed.
+Notes and focus search the PRODUCTIVITY genre. Journals use LIFESTYLE, flashcards use EDUCATION, reading lists use BOOKS_AND_REFERENCE, and counters use TOOLS. Free-text domains remain supported. There are six suggested choices in two rows of three on wide screens, with two columns on smaller screens and one on very narrow screens. New workspaces still choose at most two domains per project. Older saved workspaces remain readable; narrow them before using the design pipeline.
 
-**What stays honest.** The opportunity score (1–15) is the scanner's proxy from public listing data, not revenue. A scan with failed requests or fewer than five matches is labeled as such. Apps that drop out of a rescan stay visible while they have selected features, and plans that no longer fit the shown apps are cleared. Selected live apps, their market evidence and the scan metadata are included in `DESIGN.md`, the per-app briefs and `project.json`.
+The scanner collects up to **90 candidates per domain** by default. Meld reads the full `ranking` from the CLI report, rather than its legacy `top_five` field. Scores and ranks describe the collected sample, not official Google Play charts or measured revenue. The response preserves collection failures and warnings. Reports are cached for 24 hours. Selected apps from earlier scans remain available when still eligible.
 
-Local endpoints: `GET /api/market/status` and `POST /api/market/scan` with `{"domain": "Finance", "refresh": false}`. The browser sends at most two scans at a time and shows the others as waiting; the server also runs at most two at once. Results are cached in `frontend/.meld-cache/`, which Git ignores. An app that ranks in two chosen domains is listed once and appears under both domain filters.
+**Simple apps only** is the default filter. **Include apps needing review** also shows uncertain candidates. Complex apps stay excluded. The filter uses the title, summary and store description. It excludes AI, shared services, financial services, advanced media, hardware/health integrations and broad product suites. Unknown workflows and possible cloud dependencies need review. Each excluded app has a visible reason. Cloud/account/payment/widget features are also removed from selectable store features and design requests.
 
-Optional settings in `.env.local` or the shell:
+Free-text domains expand the search topic; they do not add new simple-workflow rules. For example, Gaming can return many apps while none qualify as simple. Apps without a matching workflow rule need review; listings matching an exclusion rule remain hidden. When all results are filtered out, the page shows the ranked and shown counts with the reasons for exclusions. **Include apps needing review** enables summaries for review candidates. It does not mark them as simple or REA-verified. A filtered scan is distinct from a scan that found no apps.
+
+Policy v2 checks relevance to each focused domain. Flashcards must describe creating, editing or importing the user's cards; a fixed alphabet course is not enough. Reading lists must describe manual entry or offline/local use. Shared journals, book clubs, reading services, shared deck libraries and broad study platforms are excluded. For the new domains, offline support alone does not override a sign-in dependency. The same shared rules screen feature choices and the design handoff.
+
+Policy v3 adds Counters & tallies. Listings must describe manual or tap/click counting. Sensor counters, camera/object detection, automatic counting and business inventory systems are excluded. The intended behavior is a small local state change: increment, decrement, reset and save a total. The [Counter project](https://github.com/gentlecat/counter) is one concrete example of this Android workflow; it is not a REA reconstruction case study.
+
+These are **scope estimates**, not proof that a whole app can be copied. The intended output contains no accounts, cloud sync, social features, payments or ad systems. APK analysis must establish the selected behavior. Only the features you request belong in the design. Reference cards come only from real Google Play scans, including saved scans. Pending, failed and empty scans never insert preset apps. Pending summaries never insert preset features. Old saved demo selections are discarded; live selections and user text are preserved.
+
+## Why REA fits this scope
+
+The domain choices are an engineering inference from REA's documented capabilities:
+
+- [Notes/Electron guide](https://rea.tools/guides/javascript/): traces a small CSV export through the renderer, preload and main process. This supports studying bounded data workflows.
+- [Notes/browser guide](https://rea.tools/guides/browser/): ties an export click to its request and download code. This supports checking observable behavior.
+- [Aegis APK case study](https://rea.tools/showcase/aegis/): locates and reconstructs a particular Android calculation. The project reports 133 comparison cases and public reference checks. This demonstrates a feature analysis method; it is not a full authenticator rebuild.
+- [Notion clipboard case study](https://rea.tools/showcase/notion/): traces one clipboard feature. It does not establish that Notion's full product is a simple rebuild. Notion is excluded here.
+
+Local checks on 2026-10-14: real Google Play scans ranked 56 Notes & lists apps and 65 Focus & habits apps. Policy v1 kept 24 and 48 simple candidates respectively. Counts change with listings. REA reproduced the documented Notes example's one paired IPC export channel. REA also inspected the [official Notally 6.2 APK](https://github.com/OmGodse/Notally/releases/tag/v6.2) and reported package `com.omgodse.notally`, version 6.2. These static checks establish that the tooling works; they do not establish a complete reconstructed app or runtime equivalence.
+
+The expanded-domain scan on the same date ranked 33 journal apps, 30 flashcard apps and 50 reading apps. Policy v2 kept 19, 4 and 4 simple candidates respectively. Examples include Private Offline Journal, Byheart and Books Tracker: Book Library. Full scans and per-app decisions are saved locally under `.meld-cache/verification/domain-*.json` and `expanded-domains-fit.json`. These are real listing checks, not APK reconstruction tests.
+
+The sixth-domain scan ranked 39 counter apps. Policy v3 kept 22 simple candidates. The raw result and filter decisions are saved in `.meld-cache/verification/domain-counters-tallies.json` and `counters-fit.json`.
+
+The new choices extend the same bounded storage-and-review approach: dated text entries, question/answer pairs, and books with reading status. REA's [Android analysis documentation](https://github.com/morluto/rea/blob/main/docs/android-analysis.md) supports inspecting manifests, classes, methods and references in JVM-based APKs. The [Diary documentation](https://billthefarmer.github.io/diary/) gives a concrete example of plain-text entry storage and search. [Openreads](https://github.com/mateusz-bak/openreads) documents a personal book-tracking workflow, but uses Flutter, which is not evidence that JADX can recover its Dart implementation. These sources inform domain selection; they are not REA case studies of every app shown. Stage 3 must verify the selected APK, implementation stack and exact feature before treating the proposed behavior as established.
+
+## Review and delivery: Zhuoxuan's design and coding workflow
+
+**Confirm features and generate design** hands the exact selected live apps and features to the upstream persistent project API. The server reads immutable scan IDs and checks app ownership and complexity. It preserves the full clarified intent as `brief.input`; selected feature text is explicitly saved as user preferences. It does not rerun upstream research or replace the selected apps with a top-five list. Select one to five reference apps with completed summaries. The first design groups related requests into at most five primary features without silently dropping them.
+
+The first response is a short editable outline. Edit its purpose, audience, features, steps, pages and appearance. Save edits before approving. Free-text changes produce a preview. **Approve design and build app** approves the exact saved version, prepares the detailed specification, starts the coding agent, and opens **Get your app**. Jobs survive browser reloads. Failed jobs show their error and a retry action. A failed detailed design resumes its saved checkpoint if the app profile is unchanged. Completed design sections receive targeted field edits for review findings, with recorded model provenance and a new full review. Failed generator exits cannot publish an older artifact. Changing the profile requires a fresh task. Downloads belong to the current design version.
+
+The worker generates Kotlin modules, runs Gradle build/unit-test/lint checks, reviews the implementation, and repairs affected files. It publishes a debug APK only after the configured gates pass. The UI reports whether device behavior was checked; compiler/model checks alone are not runtime verification.
+
+Reference APKs use `.meld-cache/apks/<package.id>.apk`. The latest backend can obtain missing APKs from Aptoide. Set `MELD_APK_AUTO_DOWNLOAD=false` to disable acquisition. If an APK is unavailable or analysis is incomplete, the backend can continue with a market-assisted design. Listing-based proposals remain distinct from verified static APK findings. REA evidence is never fabricated to fill a missing APK.
+
+The selected-feature prompt remains at `frontend/prompts/design-selection/prompt.md`; new outline approval supersedes original selections when the user edits the design. Saved projects and APK downloads continue to open in the current studio.
+
+**Try app in browser** installs the exact delivered APK in a dedicated Android emulator. Click or swipe its screen, send text, go back, or restart the app. Close preview releases the session and removes that test installation. One preview runs at a time. Trying the app does not mark the build as automatically runtime-verified.
+
+Setup creates the preview AVD from an already installed system image. It detects Apple Silicon even when the shell runs through Rosetta. It does not download a system image automatically. Set `MELD_EMULATOR_ENABLED=false` to disable preview. Export setup overrides in the launching shell: `MELD_EMULATOR_IMAGE`, `MELD_EMULATOR_AVD_HOME`, `MELD_EMULATOR_AVD` and `MELD_EMULATOR_PORT`. The default port is 5582. An unrelated emulator on that port is left alone. APK downloads remain available when preview is unavailable.
+
+Reference APK acquisition and analysis can run while you edit the outline. Approval reuses that saved attempt. Incomplete analysis remains labeled as partial. Editing research keeps the same project and preserves its earlier design revisions. Failed outline generation offers a retry after reload without dropping selected features. Failed detailed generation creates a new retry job using the same pipeline checkpoint, keeping the original failure record and approved outline. Changed profiles cannot resume stale work.
+
+Android builds need SDK platform 35, build-tools 35.0.0 and JDK 17+. On macOS the integration detects `~/Library/Android/sdk` and Android Studio's JDK. Override paths with `MELD_ANDROID_SDK`, `JAVA_HOME` and `MELD_AAPT`. The original `scripts/dev.sh` starts everything on port 4173; no second manual backend launch is needed. Run `scripts/dev.sh --restart` after updating backend code.
+
+## Settings and data
+
+Copy `.env.example` to `.env.local`. Keys stay on the server. Shell variables take precedence. Do not prefix secrets with `VITE_`.
 
 ```dotenv
-# Another scanner checkout, or a Python that has app_market installed.
-# Default: the repository that contains this folder when it is new_app_agent,
-# otherwise ../third_parties/new_app_agent.
+MELD_MARKET_CANDIDATES=90
+MELD_MARKET_CACHE_HOURS=24
 MELD_MARKET_DIR=
 MELD_MARKET_PYTHON=
-# Candidates per scan (5–200) and cache lifetime.
-MELD_MARKET_CANDIDATES=30
-MELD_MARKET_CACHE_HOURS=24
-```
-
-## Store-listing features (Claude Code)
-
-Google Play has no feature list, only the developer's free-text description. Meld's local server sends the five descriptions of each scanned domain to your own Claude Code in non-interactive mode (`claude -p`), on your Claude subscription, and shows the features it returns. One call per domain takes about 5–15 seconds.
-
-- **Stored prompt template.** The prompt lives in `prompts/app-features/`: `system.md`, `prompt.md` (with `{{domain}}` and `{{apps}}`) and `schema.json` (the required JSON shape). Its id, such as `app-features@83dbcfb1bca3`, names the folder and a hash of the three files, so any edit is a new template.
-- **Fixed command.** `claude -p --safe-mode --setting-sources "" --tools "" --strict-mcp-config --no-session-persistence --output-format json --model claude-haiku-5-5 --effort low --system-prompt <system.md> --json-schema <schema.json>`, with the filled-in prompt on standard input. Claude gets no tools, and no hooks, plugins, MCP servers, CLAUDE.md or settings files are loaded, so store text cannot make it act on your computer and your personal Claude Code settings do not change results. `--dangerously-skip-permissions` is not needed: there are no tools to approve.
-- **Reproducible results.** Each run is saved in `.meld-cache/features/` with the template id, model, exact command, filled-in prompt, raw output and cleaned features. The same template, command, model and listings return the saved result instead of a new run. Each feature also records its model and template id, shown on the app page and in `DESIGN.md`.
-- **Honest labels.** These are what each developer says about the app, not verified analysis. REA can verify them later.
-
-Meld finds `claude` on your PATH, in `~/.local/bin`, `~/.claude/local`, Homebrew, npm or nvm folders. Settings in `.env.local`:
-
-```dotenv
-# The CLI, if Meld cannot find it.
+MELD_APK_DIR=
+MELD_PIPELINE_TOOL_ROOT=
+MELD_PIPELINE_CONFIG=
+MELD_DESIGN_EXAMPLE=
+MELD_ANDROID_SDK=
+JAVA_HOME=
+MELD_APK_AUTO_DOWNLOAD=true
 MELD_CLAUDE_BIN=
-# Which login: the CLAUDE_CONFIG_DIR of a logged-in Claude Code account,
-# for example the folder an alias like `CLAUDE_CONFIG_DIR=~/.claude claude` uses.
 MELD_CLAUDE_CONFIG_DIR=
 MELD_CLAUDE_MODEL=claude-haiku-5-5
 ```
 
-Check a login with `CLAUDE_CONFIG_DIR=<folder> claude auth status`. Without Claude Code, or when it is not logged in, Meld says so in the market panel and on each app page, and offers only the sample features each listing mentions. Endpoints: `GET /api/claude/status` and `POST /api/claude/features` with `{"domain": "Finance", "apps": [{"appId", "title", "summary", "description"}], "refresh": false}`; at most two runs at once.
+Live app feature summaries use your Claude Code login. The stored prompt lives in `prompts/app-features/`. Calls have no tools or personal settings. Live features come only from completed Claude summaries. Cards show processing, queue, unavailable, or retry status while waiting. Empty summaries stay empty; keyword guesses and saved sample features never fill the gap. Summaries run in batches of eight eligible listings and are cached with the prompt/model provenance.
 
-## Connect AI suggestions
+Clarification and outline calls use `gpt-5.6-sol` by default. Detailed design generation and review use `gpt-6-astra` at medium effort (`design_model` and `design_reasoning_effort` in the pipeline runtime configuration can override them). App code generation, repair and review also use `gpt-6-astra`; generation uses medium effort and implementation review uses high effort. These model names were checked with live CLI calls. Export `MELD_CODEX_MODEL` in the launching shell to override short project and build calls, or `MELD_CODEX_BUILD_MODEL` to override only coding calls. Feature summaries remain on Claude Haiku with low effort.
 
-Create `frontend/.env.local` from `.env.example`, add your OpenRouter key, and restart the local server:
+Workspace choices live in browser storage under `meld.workspace.v1`. Server scans, model responses, APKs and design revisions live in the ignored `.meld-cache/` folder. Public listing text goes to the configured model when summarized. The analysis pipeline sends selected APK evidence to its model.
 
-```dotenv
-OPENROUTER_API_KEY=your-key-here
-MELD_AI_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-```
-
-The model setting is optional. The default uses a free OpenRouter model; provider availability and limits still apply. You can choose another OpenRouter model that supports structured JSON outputs. Existing shell variables take precedence over `.env.local`.
-
-The key stays on the local server. Do not prefix it with `VITE_` or put it in browser storage. `.env.local` is ignored by Git. The key is never included in the browser bundle or project downloads.
-
-Click **Suggest a combination** to send your goal, chosen domains, and the shown apps with their feature IDs to OpenRouter. The app validates returned feature IDs before showing the plan. **Use this plan** applies the full mix and fills empty app-brief fields. It preserves a name or brief you already wrote. Suggestions do not change your selection until you apply them. **Undo** restores the prior mix. Manual feature edits clear the approved combination so an outdated plan is not exported.
-
-Without a key or network connection, **Try an example** demonstrates the same approval flow. It is labeled **Example plan**, not AI. Unknown custom domains remain saved, but need a catalog domain before a feature plan can be suggested.
-
-The local endpoints are `GET /api/ai/status` and `POST /api/ai/suggest`. They run with both `npm run dev` and `npm run preview`. Requests are bounded, cancelable, and limited to one concurrent generation per server. Provider failures leave the current selection unchanged.
-
-## Demo boundary
-
-Market signals are real when the scanner is set up: the shown apps and their numbers come from live Google Play data. Their features are Claude Code summaries of what each developer says in the store listing, or sample feature briefs matched to the listing where no summary exists. Neither is verified analysis of those apps. The fallback catalog is a curated example. AI feature planning is real when connected. REA analysis and autonomous coding are not connected. “Create my app” assembles a local browser template. It does not generate or compile an Android APK. A suggested journey is a design proposal; the template demonstrates its chosen features as separate modules.
-
-The brief for each source app and the combined design document are ready for a future backend integration. `src/artifacts.ts` is the current export boundary. A real workflow service can replace the template step and supply build artifacts and status.
-
-## Data
-
-Workspace choices and the latest scan for each domain are saved in this browser under `meld.workspace.v1`. Removing a domain also removes its selections and scan results. New project asks before clearing the workspace. If storage is blocked, the UI explains that changes cannot survive a reload.
-
-The preview frame is isolated. Download or open the demo to use its own browser storage. Exported app data stays local. File-URL storage behavior varies by browser. Timers run while the demo page remains open. Market scans send only search phrases and app IDs to Google Play. Feature summaries send the domain and the apps' public store text to Anthropic through your Claude Code login. AI planning sends only the described request data to OpenRouter when requested. Accounts, cloud storage, and telemetry are not connected.
-
-## Development and verification
+## Verification
 
 ```sh
 npm run build
 npm test
+npm --prefix ../pipeline test
 ```
 
-The Playwright suite uses the installed Google Chrome browser. It starts a local server when needed. UI tests use the sample catalog and controlled market responses, so they do not contact Google Play. To also check the real scanner end to end, run `MELD_LIVE_MARKET=1 npm test` after `npm run setup:market`; add `MELD_LIVE_CLAUDE=1` to include real Claude Code summaries (this uses your subscription); without it a labeled stand-in names three features per listing. It scans each domain on its own, all six together, overlapping domains, eight domains including unusual custom names, and quick toggling and reloads. Tests cover the five screens, selection persistence, invalid and hostile input, generated ZIP contents, offline exports, all 16 demo features, timer completion, accessibility, and layouts at 320, 390, 768, 1024, and 1440 pixels. Market tests cover the scanner's request arguments and report conversion, caching, scan limits and cancellation, failures, the sample fallback, rescans that keep selected apps, custom domains, and market evidence in exports. The suggestion tests cover suggestion approval, undo, cancellation, retry, malformed responses, catalog navigation, scoped bulk actions, server credential handling, and provider errors. Automated tests use controlled provider responses and do not make paid model calls. Failures retain screenshots and traces.
+Tests also cover clarification before search, retries, saved answers, feature-query cache separation, selected-reference import, editable outline approval and Android delivery through the real project API with synthetic workers. Tests cover old-bookmark migration, expanded rankings, conservative filtering, persisted live selections, scan and summary failures/retries, API validation, selected-only design handoff, missing APKs, design edits, revisions, exports, accessibility and narrow layouts. Tests for the retired demo/template UI were replaced with current studio coverage. Automated model tests use fixtures. They do not claim to prove a live model-generated design. The real scanner and static REA checks above were run separately.
 
-For visual review:
+Integration check on 2026-10-15: 207 frontend, backend and pipeline tests passed; seven opt-in live scans were skipped in the regression suite. A separate live run completed intent clarification, feature-based Google Play search (56 ranked apps, 31 simple candidates), a real listing summary, an edited and approved outline, detailed design, coding, review and APK delivery. The generated notes app passed compilation, lint, 67 unit tests and 14 manual ADB checks on an Android API 36 emulator. The APK downloaded through Meld matched the tested APK's SHA-256. Desktop and mobile delivery pages had no Axe violations or horizontal overflow, and the ready state survived reload.
 
-```sh
-npm run dev
-node tests/visual-capture.mjs
-```
+The reference APK analysis was partial, so this run used a market-assisted design. The manual device checks are recorded separately; they do not change the build worker's `runtimeVerified: false` flag. Results and screenshots are saved locally in `.meld-cache/verification/integration-20261015.json` and `.meld-cache/verification/android-integration-20261015/`.
 
-Screenshots are written to the ignored `qa-screenshots/` directory.
-
-## Project structure
-
-- `src/App.tsx` — the five screens and navigation.
-- `src/data.ts` — domains, sample apps, and feature briefs.
-- `src/state.ts` — validated saved state and feature merging.
-- `src/SuggestionPanel.tsx` / `src/suggestions.ts` — suggestion UI, plan validation, and offline examples.
-- `server/suggestions.ts` — local API, server-side credentials, bounded model requests, and response validation.
-- `server/market.ts` — local market API: runs the scanner, converts and caches its reports, and limits concurrent scans.
-- `server/claude.ts` — local Claude Code API: finds the CLI, runs the stored prompt template with `claude -p`, validates and saves each run.
-- `prompts/app-features/` — the prompt template, system prompt and output schema for store-listing features.
-- `src/useFeatures.ts` — requests feature summaries for each new scan, with retry.
-- `src/market.ts` — domain-to-scan mapping, market data validation, store-listing and sample features, and the live catalog.
-- `src/useMarket.ts` — starts, cancels and retries scans for the chosen domains.
-- `scripts/setup-market.sh` — installs the scanner into its own virtual environment.
-- `src/artifacts.ts` — Markdown documents, standalone HTML, and ZIP exports.
-- `src/demo-runtime.js` — interactions in the exported app.
-- `src/styles.css` / `src/demo.css` — studio and exported app styles.
-- `tests/` — browser tests and visual capture script.
-
-## Interface references
-
-The reading hierarchy uses a local copy of Inter, clear headings, neutral surfaces, and consistent coral actions. References: [Linear's issue interface](https://linear.app/docs/my-issues), [Atlassian typography](https://atlassian.design/foundations/typography/), and [NN/g's visual hierarchy guidance](https://www.nngroup.com/articles/visual-hierarchy-ux-definition/).
+Latest upstream merge on 2026-10-15: Zhuoxuan's `ab005dd` is merged locally as `e05f67a`. The integrated frontend follows its three-step studio. All 233 automated checks passed: 124 frontend tests, 50 backend/upstream UI tests and 59 pipeline tests. Seven optional live scans were skipped. Production build and clean-checkout patch checks passed. A separate live check opened the previously delivered APK in the browser emulator, created and saved a note through browser controls, checked persistence after restart, and closed the preview. Desktop and mobile preview pages passed accessibility and overflow checks. Evidence is in `.meld-cache/verification/upstream-merge-20261015.json`.

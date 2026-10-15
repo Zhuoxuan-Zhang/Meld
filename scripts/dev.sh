@@ -58,7 +58,29 @@ open_url() {
   fi
 }
 
-# 1. Node.js 22.19+ or 24+. Loads nvm when node is not already on PATH.
+listening() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    curl -s -o /dev/null -m 2 "$URL"
+  fi
+}
+
+# Reopening Meld must not rebuild Vite's imported pipeline and interrupt an
+# active design or coding job. Explicit restart/check still runs setup below.
+if [ "$CHECK" = 0 ] && [ "$RESTART" = 0 ] && listening; then
+  if ! curl -s -m 5 "$URL/api/status" | command grep -q '"service"[[:space:]]*:[[:space:]]*"meld-project-api"'; then
+    fail "Port $PORT is used by another program. Stop it, or run: MELD_PORT=4180 scripts/dev.sh"
+  fi
+  if curl -s -m 30 "$URL/api/market/status" | command grep -q '"source"'; then
+    say "Meld is already running at $URL"
+    note "To restart it, run scripts/dev.sh --restart"
+    open_url "$URL"
+    exit 0
+  fi
+fi
+
+# 1. Node.js 22.19+ or newer. Loads nvm when node is not already on PATH.
 if ! command -v node >/dev/null 2>&1; then
   NVM_SH="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
   if [ -s "$NVM_SH" ]; then
@@ -75,53 +97,37 @@ node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.ex
   fail "Meld needs Node.js 22.19 or newer; this computer has $(node -v)."
 
 # 2. Frontend dependencies, installed again whenever package-lock.json changes.
-if [ ! -f "$ROOT/pipeline/node_modules/.package-lock.json" ] || [ "$ROOT/pipeline/package-lock.json" -nt "$ROOT/pipeline/node_modules/.package-lock.json" ]; then
-  say "Installing the design pipeline"
-  npm --prefix "$ROOT/pipeline" ci --no-audit --no-fund
-fi
-say "Compiling the design pipeline"
-npm --prefix "$ROOT/pipeline" run build
 cd "$FRONTEND"
 if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   say "Installing frontend dependencies"
   npm ci --no-audit --no-fund
 fi
 
-# 3. Market-signal scanner. Optional: without it Meld shows its sample apps.
+say "Preparing the design backend"
+bash "$FRONTEND/scripts/setup-design.sh"
+
+# 3. Market-signal scanner. Missing setup shows a connection error in Meld.
 if [ -n "${MELD_MARKET_PYTHON:-}" ]; then
   note "Market scanner: using MELD_MARKET_PYTHON=$MELD_MARKET_PYTHON"
 elif [ ! -f "$SCANNER/pyproject.toml" ]; then
-  note "Market scanner not found at $SCANNER; Meld will show sample apps."
+  note "Market scanner not found at $SCANNER; app discovery will show a connection error."
 elif [ ! -f "$SCANNER/.venv/.meld-ready" ] ||
   [ "$SCANNER/pyproject.toml" -nt "$SCANNER/.venv/.meld-ready" ] ||
   ! "$SCANNER/.venv/bin/python" -c 'import app_market.scanner' >/dev/null 2>&1; then
   say "Setting up the market-signal scanner"
   MELD_MARKET_DIR="$SCANNER" bash "$FRONTEND/scripts/setup-market.sh" ||
-    note "Market signals are not set up; Meld will show sample apps."
+    note "Market signals are not set up; app discovery will show a connection error."
 fi
 export MELD_MARKET_DIR="$SCANNER"
-
-# 4. AI suggestions are optional and need an OpenRouter key.
-if [ -z "${OPENROUTER_API_KEY:-}" ] &&
-  ! command grep -qs '^OPENROUTER_API_KEY=.' .env.local; then
-  note "AI suggestions are off. Add OPENROUTER_API_KEY to frontend/.env.local to turn them on."
-fi
 
 if [ "$CHECK" = 1 ]; then
   say "Running the test suite"
   exec npx playwright test
 fi
 
-# 5. Start the local server, or reuse the Meld server already running.
-listening() {
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
-  else
-    curl -s -o /dev/null -m 2 "$URL"
-  fi
-}
+# 4. Start the local server, or reuse the Meld server already running.
 if listening; then
-  if ! curl -s -m 5 "$URL/api/ai/status" | command grep -q '"provider"'; then
+  if ! curl -s -m 5 "$URL/api/status" | command grep -q '"service"[[:space:]]*:[[:space:]]*"meld-project-api"'; then
     fail "Port $PORT is used by another program. Stop it, or run: MELD_PORT=4180 scripts/dev.sh"
   fi
   if [ "$RESTART" = 0 ] &&
@@ -144,4 +150,4 @@ fi
 say "Starting Meld at $URL (press Control-C to stop)"
 args=(--host 127.0.0.1 --port "$PORT" --strictPort)
 [ "$OPEN" = 1 ] && args+=(--open)
-exec node "$ROOT/scripts/serve.mjs" "${args[@]}"
+exec npx vite "${args[@]}"

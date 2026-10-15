@@ -12,15 +12,19 @@ async function connect(page: Page, api: ProjectTestServer) {
     await route.fulfill({ response });
   });
 }
+async function openReferences(page: Page, api: ProjectTestServer) {
+  const saved = await api.service.create({ requestKey: randomUUID(), brief: idea });
+  await api.service.research(saved.id, { requestKey: randomUUID(), expectedVersion: saved.version });
+  await api.service.idle();
+  await page.goto(`/?project=${saved.id}`);
+}
 async function example(page: Page) { await page.goto("/"); await page.getByRole("button", { name: "Try the Notes example" }).click(); await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible(); }
-test("three-step workflow: idea → research → human choices → design → selective change → APK (synthetic providers)", async ({ page }) => {
+test("saved references → human choices → design → selective change → APK (synthetic providers)", async ({ page }) => {
   test.setTimeout(60000); const api = await projectServer({ listedFeatures: true });
   try {
-    await connect(page, api); await page.goto("/"); await page.getByLabel("Describe your app", { exact: true }).fill(idea.input);
-    await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("App name", { exact: true }).fill(idea.name); await page.getByLabel("Search topic", { exact: true }).fill("Productivity");
-    await page.getByRole("button", { name: "Explore ideas", exact: true }).click();
+    await connect(page, api); await openReferences(page, api);
     await expect(page.getByRole("heading", { name: "What would you like to keep?" })).toBeVisible();
-    const appOrder = await page.locator(".studio-market-app h3").allTextContents();
+    const appOrder = await page.locator(".studio-reference-card h3").allTextContents();
     expect(appOrder.length).toBeGreaterThan(0); expect(appOrder.length).toBeLessThanOrEqual(5);
     expect(api.counts().analysisCalls).toBe(0);
     await expect(page.locator(".studio-feature-choice")).toHaveCount(0);
@@ -31,7 +35,7 @@ test("three-step workflow: idea → research → human choices → design → se
     await feature.getByText("Customize Quick notes", { exact: true }).click();
     await feature.getByLabel("Feature name", { exact: true }).fill("Quick capture");
     await feature.getByLabel("How should it work?", { exact: true }).fill("Capture a note offline with a single action.");
-    expect(await page.locator(".studio-market-app h3").allTextContents()).toEqual(appOrder);
+    expect(await page.locator(".studio-reference-card h3").allTextContents()).toEqual(appOrder);
     await page.getByPlaceholder("Describe a feature you’d like to add").fill("Pin important notes");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     expect(api.counts().analysisCalls).toBe(0);
@@ -73,7 +77,7 @@ test("free text, clarification, dismiss and restore stay in one review workspace
 test("missing APKs continue to the design while progress stays concise across reload", async ({ page }) => {
   test.setTimeout(60000); const api = await projectServer({ apks: false });
   try {
-    await connect(page, api); await page.goto("/"); await page.getByLabel("Describe your app", { exact: true }).fill(idea.input); await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("Search topic", { exact: true }).fill("Productivity"); await page.getByRole("button", { name: "Explore ideas", exact: true }).click();
+    await connect(page, api); await openReferences(page, api);
     await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
     const progress = page.getByLabel("Design generation progress"); await expect(progress).toContainText("Get reference apps"); await expect(progress.locator("li")).toHaveCount(5);
     await expect(progress.locator(".studio-pipeline-apps")).toHaveCount(0); await expect(page.getByText("Check again", { exact: true })).toHaveCount(0); await expect(page.getByRole("button", { name: "Retry failed APK downloads" })).toHaveCount(0);
@@ -107,7 +111,7 @@ for (const width of [390, 1440]) test(`reference cards, screenshots and feature 
     await expect(first.locator(".studio-reference-icon img")).toHaveCount(0); // Broken icon falls back to the initial.
     await first.getByRole("button", { name: `Explore ${name}`, exact: true }).click();
     await expect(first.getByRole("region", { name: `${name} store screenshots` }).getByRole("img")).toHaveCount(2);
-    const mix = width < 760 ? page.locator(".studio-mobile-mix") : page.getByRole("complementary", { name: "Your app profile" });
+    const mix = page.getByRole("region", { name: "Your feature mix" });
     await first.getByRole("button", { name: "Select all", exact: true }).click();
     await expect(first.getByRole("checkbox").first()).toBeChecked(); await expect(mix).toContainText("Quick notes");
     await mix.getByRole("button", { name: `Remove Quick notes from ${name}`, exact: true }).click();
