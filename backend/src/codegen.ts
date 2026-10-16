@@ -1,6 +1,7 @@
 import { z, write, exists, json, WorkbenchError } from "../../pipeline/dist/src/integration.js";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { parseCodex } from "../../pipeline/dist/src/codex.js";
 import { fileSha } from "../../pipeline/dist/src/integration.js";
 import { modelJson } from "./model";
@@ -44,9 +45,17 @@ export async function generateSources(directory: string, round: number, instruct
       if (index < completed.length) continue;
       await progress(`Applying app corrections ${index + 1} of ${plan.files.length}…`);
       const existing = merged.get(file.path), context = { ...data, issues, plan, requestedFile: file, currentFiles: [...merged.values()] };
+      const askRepair = async <T>(schema: z.ZodType<T>, prompt: string, effort: string): Promise<T> => {
+        try { return await ask(directory, `repair-file-${round}-${index}`, prompt, context, schema, 12000, effort, 360000); }
+        catch (error) {
+          if ((error as WorkbenchError).code !== "model_output") throw error;
+          await progress(`Retrying app corrections ${index + 1} of ${plan.files.length}…`);
+          return ask(directory, `repair-file-${round}-${index}-retry`, prompt + " The previous response did not complete or validate. Keep the response compact, preserve required behavior and shared signatures, and omit commentary and repeated declarations.", context, schema, 12000, "low", 360000);
+        }
+      };
       const generated = existing
-        ? applySourceEdits(existing, await ask(directory, `repair-file-${round}-${index}`, instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.", context, SourceEdits, 12000, "medium", 600000))
-        : await ask(directory, `repair-file-${round}-${index}`, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete. Do not emit Markdown fences.", context, SourceFile, 12000, "medium", 900000);
+        ? applySourceEdits(existing, await askRepair(SourceEdits, instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.", "medium"))
+        : await askRepair(SourceFile, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete, aiming for 800–1800 output tokens without repeated boilerplate. Do not emit Markdown fences.", "low");
       if (generated.path !== file.path) throw new WorkbenchError("invalid_code", "The repaired file does not match its planned module.", 422);
       checkSourcePaths([generated]); merged.set(generated.path, generated); completed.push(generated);
       await write(checkpoint, { plan, files: completed });
@@ -110,7 +119,7 @@ export async function recoverCompletedBatch(modelDirectory: string, prior: Sourc
 
 // Reconstruct an interrupted repair from its actual recorded model plan and
 // completed responses. The caller also verifies the approved design/profile.
-export async function recoverRepairPrefix(modelDirectory: string) {
+export async function recoverRepairPrefix(modelDirectory: string, expectedIntegration?: unknown) {
   const names = (await fs.readdir(modelDirectory)).filter(name => /^repair-plan-\d+-\d+$/.test(name)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)));
   for (const name of names) {
     const planFile = path.join(modelDirectory, name, "response.json"), prompt = path.join(modelDirectory, name, "prompt.txt");
@@ -119,11 +128,12 @@ export async function recoverRepairPrefix(modelDirectory: string) {
       const plan = PatchPlan.parse(parseCodex(await json(planFile), PatchPlan, 6000));
       checkSourcePaths(plan.files.map(file => ({ path: file.path, content: "planned" })));
       const data = JSON.parse((await fs.readFile(prompt, "utf8")).trim().split("\n").at(-1)!);
+      if (expectedIntegration !== undefined && !isDeepStrictEqual(data.integration, expectedIntegration)) continue;
       const prior = SourceFiles.parse(data.prior); checkSourcePaths(prior.files);
       const issues = z.array(z.string()).parse(data.issues), round = name.split("-")[2];
       const all = await fs.readdir(modelDirectory), files: Sources["files"] = [], calls: { path: string; sha256: string }[] = [];
       for (const [index, file] of plan.files.entries()) {
-        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
+        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}(?:-retry)?-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
         if (!candidate) break;
         const responseFile = path.join(modelDirectory, candidate, "response.json"); if (!(await exists(responseFile))) break;
         let parsed: z.infer<typeof SourceFile>;

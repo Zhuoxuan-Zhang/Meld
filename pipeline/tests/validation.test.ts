@@ -164,3 +164,11 @@ it('renders game palettes and accent controls without inherited notes context', 
   expect(html).not.toContain('normal · Notes');
   expect(controls({ design: d, brief: {}, decisions: { selections: [] } } as any).find(control => control.id === 'primary-color')?.value).toBe('#2357C6');
 });
+
+it('detects an explicit Codex server output-limit error without matching generated content or other network errors', async () => {
+  const { isCodexOutputLimitError } = await import('../src/codex.js');
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'error', message: 'Reconnecting... (Incomplete response returned, reason: max_output_tokens)' }))).toBe(true);
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'reason: max_output_tokens' } }))).toBe(false);
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'error', message: 'Connection reset' }))).toBe(false);
+  expect(isCodexOutputLimitError('incomplete JSON')).toBe(false);
+});
