@@ -35,7 +35,7 @@ export function designApi(options: DesignApiOptions): Plugin {
   const ready = () => runtime.recovery ||= Promise.all([changes.recover(), pipeline.recover()]).then(() => undefined);
   const modelAvailable = () => {
     if (available !== undefined) return available;
-    const result = spawnSync("claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
+    const result = spawnSync(process.env.MELD_CLAUDE_BIN || "claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
     if (result.status !== 0) { available = false; return available; }
     try { available = JSON.parse(result.stdout).loggedIn === true; } catch { available = true; }
     return available;

@@ -14,6 +14,12 @@ export default defineConfig(({ mode }) => {
   } as Record<string, string>;
   const cache = path.join(process.cwd(), ".meld-cache");
   const signals = new SignalsStore(path.join(cache, "signals"));
+  const claude = claudeOptionsFromEnv(env, process.cwd());
+  // Backend workers inherit the same CLI and login used for listing summaries.
+  // Keep the summary model separate from the backend's model defaults.
+  const claudeBinary = claude.locate();
+  if (claudeBinary) process.env.MELD_CLAUDE_BIN = claudeBinary;
+  if (claude.env.CLAUDE_CONFIG_DIR) process.env.CLAUDE_CONFIG_DIR = claude.env.CLAUDE_CONFIG_DIR;
   return {
     plugins: [
       react(),
@@ -21,7 +27,7 @@ export default defineConfig(({ mode }) => {
       workflowApi(env, process.cwd(), signals),
       marketApi({ ...marketOptionsFromEnv(env, process.cwd()), record: result => signals.record(result) }),
       designApi({ root: path.join(cache, "designs"), signals, pipeline: { directory: path.join(cache, "pipeline-jobs"), apkDir: env.MELD_APK_DIR || path.join(cache, "apks"), toolRoot: env.MELD_PIPELINE_TOOL_ROOT, config: env.MELD_PIPELINE_CONFIG }, exampleId: env.MELD_DESIGN_EXAMPLE }),
-      claudeApi(claudeOptionsFromEnv(env, process.cwd())),
+      claudeApi(claude),
     ],
     server: { watch: { ignored: ["**/.meld-cache/**", "**/test-results/**", "**/playwright-report/**"] } },
   };

@@ -121,7 +121,7 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
   };
 }
 function claudeCliLoggedIn() {
-  const result = spawnSync("claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
+  const result = spawnSync(process.env.MELD_CLAUDE_BIN || "claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
   if (result.status !== 0) return false;
   try { return JSON.parse(result.stdout).loggedIn === true; } catch { return true; }
 }

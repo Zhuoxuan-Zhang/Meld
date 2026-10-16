@@ -332,7 +332,7 @@ index d7b2a8b..3d74783 100644
          const state = await json(path.join(run, "run.json"));
          if (state.status === "waiting_user") {
 diff --git a/backend/src/api.ts b/backend/src/api.ts
-index a3e97c2..0a0d040 100644
+index a3e97c2..2b9dbbc 100644
 --- a/backend/src/api.ts
 +++ b/backend/src/api.ts
 @@ -19,7 +19,7 @@ import { readBody, send } from "./http";
@@ -344,7 +344,14 @@ index a3e97c2..0a0d040 100644
    const sdk = env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "";
    const avdHome = env.MELD_EMULATOR_AVD_HOME || path.join(tmpdir(), `meld-browser-emulator-${createHash("sha256").update(root).digest("hex").slice(0, 12)}`, "avd"), avd = env.MELD_EMULATOR_AVD || "MeldBrowserPreview";
    const port = Number(env.MELD_EMULATOR_PORT || 5582);
-@@ -127,5 +127,5 @@ function claudeCliLoggedIn() {
+@@ -121,11 +121,11 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
+   };
+ }
+ function claudeCliLoggedIn() {
+-  const result = spawnSync("claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
++  const result = spawnSync(process.env.MELD_CLAUDE_BIN || "claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
+   if (result.status !== 0) return false;
+   try { return JSON.parse(result.stdout).loggedIn === true; } catch { return true; }
  }
  export function defaultAvailability(env: Record<string, string | undefined>, frontendDir: string) {
    const market = createMarketService(marketOptionsFromEnv(env, frontendDir));
@@ -610,7 +617,7 @@ index 631af4a..9723397 100644
  
  Backend operation semantics are part of the precompiled operation: setting a color role whose previous value is unique also replaces that old literal value throughout repeated developer contracts, including page entries. This is authorized by the same selected color operation and requires no redundant page-entry operation. Formal choices derive design.decisions from selections and derive chosen_by=user when selections change; status=final is normalized. Treat these documented deterministic transformations as authorized; do not mistake them for unselected changes. Revision review must evaluate only selected_changes, even when user_request also mentioned unselected changes.
 diff --git a/pipeline/src/claude-cli.ts b/pipeline/src/claude-cli.ts
-index 6288b58..390851a 100644
+index 6288b58..38a6e45 100644
 --- a/pipeline/src/claude-cli.ts
 +++ b/pipeline/src/claude-cli.ts
 @@ -16,7 +16,8 @@ export function parseClaudeCli(response: any, schema: z.ZodType<any>, outputLimi
@@ -623,8 +630,14 @@ index 6288b58..390851a 100644
    await write(path.join(dir, 'schema.json'), request.schema);
    await write(path.join(dir, 'prompt.txt'), request.prompt);
    const args = ['-p', '--safe-mode', '--setting-sources', '', '--tools', '', '--strict-mcp-config', '--no-session-persistence',
-@@ -28,18 +29,28 @@ export async function executeClaudeCli(dir: string, request: any, timeout: numbe
-   await write(path.join(dir, 'command.json'), { command: 'claude', args: args.map(a => a === request.system ? '<system-prompt>' : a === JSON.stringify(request.schema) ? '<json-schema>' : a), authentication: 'existing Claude Code CLI login; API-key environment variables removed' });
+@@ -24,22 +25,33 @@ export async function executeClaudeCli(dir: string, request: any, timeout: numbe
+     '--system-prompt', request.system, '--json-schema', JSON.stringify(request.schema)];
+   const env: Record<string, string> = {};
+   for (const [key, value] of Object.entries(process.env)) if (value && !sessionVariable.test(key) && !['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CODEX_API_KEY'].includes(key)) env[key] = value;
++  const command = process.env.MELD_CLAUDE_BIN || 'claude';
+   const start = Date.now();
+-  await write(path.join(dir, 'command.json'), { command: 'claude', args: args.map(a => a === request.system ? '<system-prompt>' : a === JSON.stringify(request.schema) ? '<json-schema>' : a), authentication: 'existing Claude Code CLI login; API-key environment variables removed' });
++  await write(path.join(dir, 'command.json'), { command, args: args.map(a => a === request.system ? '<system-prompt>' : a === JSON.stringify(request.schema) ? '<json-schema>' : a), authentication: 'existing Claude Code CLI login; API-key environment variables removed' });
    let stdout = '', stderr = '';
    try {
 +    signal?.throwIfAborted();
@@ -633,7 +646,7 @@ index 6288b58..390851a 100644
 -      const untrack = trackOwnedProcess(child); let timedOut = false, exceeded = false;
 -      const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeout);
 +      const detached = process.platform !== 'win32';
-+      const child = spawn('claude', args, { env, detached, stdio: ['pipe', 'pipe', 'pipe'] });
++      const child = spawn(command, args, { env, detached, stdio: ['pipe', 'pipe', 'pipe'] });
 +      const stop = () => {
 +        if (detached && child.pid) {
 +          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
@@ -1158,10 +1171,10 @@ index a911017..f8e475e 100644
    return errors;
 diff --git a/pipeline/tests/claude-cancellation.test.ts b/pipeline/tests/claude-cancellation.test.ts
 new file mode 100644
-index 0000000..b85c497
+index 0000000..fa61992
 --- /dev/null
 +++ b/pipeline/tests/claude-cancellation.test.ts
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,82 @@
 +import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 +import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 +import os from 'node:os';
@@ -1177,7 +1190,7 @@ index 0000000..b85c497
 +  await mkdir(bin);
 +  // Like the real CLI launcher, this fixture starts a child that inherits its
 +  // output pipes. Killing just the launcher would leave execution hanging.
-+  await writeFile(path.join(bin, 'claude'), `#!/usr/bin/env node
++  await writeFile(path.join(bin, 'custom-claude'), `#!/usr/bin/env node
 +const { spawn } = require('node:child_process');
 +const fs = require('node:fs');
 +const path = require('node:path');
@@ -1186,6 +1199,7 @@ index 0000000..b85c497
 +setInterval(() => {}, 1000);
 +`, { mode: 0o755 });
 +  vi.stubEnv('MELD_TEST_CLAUDE_DIR', directory);
++  vi.stubEnv('MELD_CLAUDE_BIN', path.join(bin, 'custom-claude'));
 +  vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
 +});
 +afterEach(async () => {

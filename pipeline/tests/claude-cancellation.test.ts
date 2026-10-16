@@ -13,7 +13,7 @@ beforeEach(async () => {
   await mkdir(bin);
   // Like the real CLI launcher, this fixture starts a child that inherits its
   // output pipes. Killing just the launcher would leave execution hanging.
-  await writeFile(path.join(bin, 'claude'), `#!/usr/bin/env node
+  await writeFile(path.join(bin, 'custom-claude'), `#!/usr/bin/env node
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,6 +22,7 @@ fs.writeFileSync(path.join(process.env.MELD_TEST_CLAUDE_DIR, 'started.json'), JS
 setInterval(() => {}, 1000);
 `, { mode: 0o755 });
   vi.stubEnv('MELD_TEST_CLAUDE_DIR', directory);
+  vi.stubEnv('MELD_CLAUDE_BIN', path.join(bin, 'custom-claude'));
   vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
 });
 afterEach(async () => {

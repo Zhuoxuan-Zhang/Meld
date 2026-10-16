@@ -25,14 +25,15 @@ export async function executeClaudeCli(dir: string, request: any, timeout: numbe
     '--system-prompt', request.system, '--json-schema', JSON.stringify(request.schema)];
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value && !sessionVariable.test(key) && !['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CODEX_API_KEY'].includes(key)) env[key] = value;
+  const command = process.env.MELD_CLAUDE_BIN || 'claude';
   const start = Date.now();
-  await write(path.join(dir, 'command.json'), { command: 'claude', args: args.map(a => a === request.system ? '<system-prompt>' : a === JSON.stringify(request.schema) ? '<json-schema>' : a), authentication: 'existing Claude Code CLI login; API-key environment variables removed' });
+  await write(path.join(dir, 'command.json'), { command, args: args.map(a => a === request.system ? '<system-prompt>' : a === JSON.stringify(request.schema) ? '<json-schema>' : a), authentication: 'existing Claude Code CLI login; API-key environment variables removed' });
   let stdout = '', stderr = '';
   try {
     signal?.throwIfAborted();
     const execution: any = await new Promise((resolve, reject) => {
       const detached = process.platform !== 'win32';
-      const child = spawn('claude', args, { env, detached, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(command, args, { env, detached, stdio: ['pipe', 'pipe', 'pipe'] });
       const stop = () => {
         if (detached && child.pid) {
           try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
