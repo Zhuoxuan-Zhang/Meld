@@ -144,3 +144,28 @@ test("new repair modules retry interrupted responses and preserve existing sourc
     expect(result.files.slice(0, 2)).toEqual(prior.files); expect(result.files[2].path).toBe(helper);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("implementation review never accepts a blocking issue hidden behind a passed flag", async () => {
+  const { implementationReviewPassed } = await import("../../backend/src/build");
+  expect(implementationReviewPassed({ passed: true, issues: ["[blocking] Sharing fails on an ordinary image"] })).toBe(false);
+  expect(implementationReviewPassed({ passed: false, issues: ["[follow-up] Refine corner spacing"] })).toBe(false);
+  expect(implementationReviewPassed({ passed: true, issues: ["[follow-up] Refine corner spacing"] })).toBe(true);
+});
+
+test("an ambiguous exact edit retries against the unchanged file without partially applying the rejected patch", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-"));
+  const prior = { files: [{ path: main, content: "begin value value" }, { path: tests, content: "keep tests" }], explanation: "fixture" };
+  const calls: string[] = [];
+  const ask: any = async (_dir: string, label: string, _instructions: string, data: any) => {
+    calls.push(label);
+    if (label === "repair-plan-0") return { interfaces: [], files: [{ path: main, responsibility: "fix launcher" }] };
+    if (label === "repair-file-0-0") return { path: main, edits: [{ find: "begin", replace: "changed" }, { find: "value", replace: "wrong" }] };
+    expect(data.validationError).toContain("exactly one"); expect(data.currentFiles[0].content).toBe("begin value value");
+    return { path: main, edits: [{ find: "begin value value", replace: "fixed" }] };
+  };
+  try {
+    const result = await generateSources(directory, 0, "fixture", {}, prior, ["fix"], async () => {}, ask);
+    expect(calls).toEqual(["repair-plan-0", "repair-file-0-0", "repair-file-0-0-edit-retry"]);
+    expect(result.files).toEqual([{ path: main, content: "fixed" }, prior.files[1]]); expect(prior.files[0].content).toBe("begin value value");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

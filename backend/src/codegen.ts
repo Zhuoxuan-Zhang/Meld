@@ -53,9 +53,20 @@ export async function generateSources(directory: string, round: number, instruct
           return ask(directory, `repair-file-${round}-${index}-retry`, prompt + " The previous response did not complete or validate. Keep the response compact, preserve required behavior and shared signatures, and omit commentary and repeated declarations.", context, schema, 12000, "low", 360000);
         }
       };
-      const generated = existing
-        ? applySourceEdits(existing, await askRepair(SourceEdits, instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.", "medium"))
-        : await askRepair(SourceFile, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete, aiming for 800–1800 output tokens without repeated boilerplate. Do not emit Markdown fences.", "low");
+      let generated: z.infer<typeof SourceFile>;
+      if (existing) {
+        const editInstructions = instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.";
+        const patch = await askRepair(SourceEdits, editInstructions, "medium");
+        try { generated = applySourceEdits(existing, patch); }
+        catch (error) {
+          if ((error as WorkbenchError).code !== "invalid_code" || patch.path !== existing.path) throw error;
+          await progress(`Refining app corrections ${index + 1} of ${plan.files.length}…`);
+          const corrected = await ask(directory, `repair-file-${round}-${index}-edit-retry`, editInstructions + " The prior patch did not match the exact current file. Recreate the smallest valid patch using the supplied unchanged current file and validation error. Use exact unique anchors; do not assume any rejected edit was applied.", { ...context, rejectedPatch: patch, validationError: String(error) }, SourceEdits, 12000, "low", 360000);
+          generated = applySourceEdits(existing, corrected);
+        }
+      } else {
+        generated = await askRepair(SourceFile, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete, aiming for 800–1800 output tokens without repeated boilerplate. Do not emit Markdown fences.", "low");
+      }
       if (generated.path !== file.path) throw new WorkbenchError("invalid_code", "The repaired file does not match its planned module.", 422);
       checkSourcePaths([generated]); merged.set(generated.path, generated); completed.push(generated);
       await write(checkpoint, { plan, files: completed });
@@ -133,7 +144,7 @@ export async function recoverRepairPrefix(modelDirectory: string, expectedIntegr
       const issues = z.array(z.string()).parse(data.issues), round = name.split("-")[2];
       const all = await fs.readdir(modelDirectory), files: Sources["files"] = [], calls: { path: string; sha256: string }[] = [];
       for (const [index, file] of plan.files.entries()) {
-        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}(?:-retry)?-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
+        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}(?:-(?:retry|edit-retry))?-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
         if (!candidate) break;
         const responseFile = path.join(modelDirectory, candidate, "response.json"); if (!(await exists(responseFile))) break;
         let parsed: z.infer<typeof SourceFile>;
