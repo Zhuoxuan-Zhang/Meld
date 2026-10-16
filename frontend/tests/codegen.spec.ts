@@ -107,3 +107,20 @@ test("exact source edits reject stale, ambiguous, overlapping and foreign-file p
   for (const content of ["missing", "old old", "aaa"]) expect(() => applySourceEdits({ path: main, content }, { path: main, edits: [{ find: content === "aaa" ? "aa" : "old", replace: "fixed" }] })).toThrow("exactly one");
   expect(() => applySourceEdits({ path: main, content: "old" }, { path: tests, edits: [{ find: "old", replace: "fixed" }] })).toThrow("does not match");
 });
+
+test("an incomplete module retries once without repeating completed modules or hiding the failed attempt", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-"));
+  const labels: string[] = [];
+  const plan = { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: tests, responsibility: "rules tests" }] };
+  const ask: any = async (_dir: string, label: string, _instructions: string, data: any) => {
+    labels.push(label);
+    if (label === "source-plan") return plan;
+    if (label === "file-1") throw Object.assign(new Error("Synthetic interrupted response"), { code: "model_output" });
+    return { path: data.requestedFile.path, content: "package generated\n// Synthetic source" };
+  };
+  try {
+    const result = await generateSources(directory, 0, "fixture", {}, null, [], async () => {}, ask);
+    expect(labels).toEqual(["source-plan", "file-0", "file-1", "file-1-retry"]);
+    expect(result.files.map(file => file.path)).toEqual([main, tests]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

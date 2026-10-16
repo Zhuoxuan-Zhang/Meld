@@ -57,7 +57,7 @@ export async function generateSources(directory: string, round: number, instruct
   }
   const checkpoint = path.join(directory, "generation-checkpoint.json");
   const resumed = await exists(checkpoint) ? z.object({ plan: Plan, files: z.array(SourceFile).max(16) }).strict().parse(await json(checkpoint)) : null;
-  const plan = resumed?.plan || await ask(directory, "source-plan", instructions + " Plan a small implementation with roughly 8–12 focused Kotlin files. Return the ordered file manifest and exact shared type/function signatures. Put common pure types first, game engines next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. MainActivity.kt must be present. Aim for 1000–3000 output tokens per file; split large UI implementations into separate game screens. Include every approved game mode and feature. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration.", data, Plan, 6000, "medium");
+  const plan = resumed?.plan || await ask(directory, "source-plan", instructions + " Plan a small implementation with 10–16 focused Kotlin files. Keep each file small enough to generate reliably: aim for 800–1800 output tokens and roughly 80–160 lines. Split a large coordinator into focused helpers and UI into small tool panels rather than putting every event and operation into one reducer. Return the ordered file manifest and exact shared type/function signatures. Put common pure types first, game engines next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. MainActivity.kt must be present. Split large UI implementations into separate feature screens or panels. Include every approved feature and the base app’s primary workflow. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration.", data, Plan, 6000, "medium");
   checkSourcePaths(plan.files.map(file => ({ path: file.path, content: "planned" })));
   if (!plan.files.some(file => file.path === "app/src/main/java/generated/MainActivity.kt") || !plan.files.some(file => file.path.startsWith("app/src/test/"))) throw new WorkbenchError("invalid_code", "The source plan must include a launcher and tests.", 422);
   const files: Sources["files"] = resumed?.files || [];
@@ -66,7 +66,18 @@ export async function generateSources(directory: string, round: number, instruct
   for (const [index, file] of plan.files.entries()) {
     if (index < files.length) continue;
     await progress(`Implementing app module ${index + 1} of ${plan.files.length}…`);
-    const generated = await ask(directory, `file-${index}`, instructions + " Generate only the requested Kotlin file. Follow the exact agreed interfaces and already generated declarations; do not redefine types belonging to other files. Implement complete logic for this module with no TODO placeholders. Pure tests must exercise the specified game rules and recovery, not merely assert constants. Keep this file concise. Do not emit Markdown fences.", { ...data, plan, requestedFile: file, generatedFiles: files }, SourceFile, 12000, "medium", 900000);
+    const moduleInstructions = instructions + " Generate only the requested Kotlin file. Follow the exact agreed interfaces and already generated declarations; do not redefine types belonging to other files. Implement complete logic for this module with no TODO placeholders. Pure tests must exercise the app’s domain rules and recovery as applicable, not merely assert constants. Keep this file concise, aiming for 800–1800 output tokens. Do not emit Markdown fences.";
+    const context = { ...data, plan, requestedFile: file, generatedFiles: files };
+    let generated: z.infer<typeof SourceFile>;
+    try {
+      generated = await ask(directory, `file-${index}`, moduleInstructions, context, SourceFile, 12000, "medium", 360000);
+    } catch (error) {
+      if ((error as WorkbenchError).code !== "model_output") throw error;
+      // Keep the failed raw response. Retry only this unsaved module, leaving
+      // the ordered checkpoint and completed modules untouched.
+      await progress(`Retrying app module ${index + 1} of ${plan.files.length} with a smaller response…`);
+      generated = await ask(directory, `file-${index}-retry`, moduleInstructions + " The previous response did not complete or validate. Return a compact implementation with minimal commentary and no duplicated helpers. Preserve every required behavior and exact shared signature; use existing modules rather than restating them.", context, SourceFile, 12000, "low", 360000);
+    }
     if (generated.path !== file.path) throw new WorkbenchError("invalid_code", "The generated file does not match its planned module.", 422);
     checkSourcePaths([generated]); files.push(generated);
     await write(path.join(directory, "generation-checkpoint.json"), { plan, files });

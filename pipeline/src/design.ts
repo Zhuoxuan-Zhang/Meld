@@ -8,7 +8,7 @@ import { validateComparison, validateDecisions, validateDesign } from './validat
 import { renderDesign } from './render.js';
 import { stage } from './state.js';
 import { designErrors } from './workbench/validation.js';
-import { DesignTextRepair, applyDesignTextRepair } from './design-repair.js';
+import { DesignTextRepair, applyDesignTextRepair, DesignReferenceRepair, applyDesignReferenceRepair } from './design-repair.js';
 const DesignCore=UnifiedDesign.omit({pages:true,visual:true,compose:true});
 const DesignPages=UnifiedDesign.pick({pages:true});
 const DesignContracts=UnifiedDesign.pick({visual:true,compose:true});
@@ -17,6 +17,26 @@ async function repairDesignText(run: string, state: any, model: Claude, base: an
   const dir = path.join(run, 'synthesis');
   let design = draft;
   const repairs: any[] = [];
+  const referenceErrors = designErrors({ design, brief: base.brief, decisions }, comparison, base.specs);
+  if (referenceErrors.length && referenceErrors.every(error => /^(Missing core task |Design omits decision |Unknown design decision )/.test(error))) {
+    const tasks = base.brief.core_tasks, options = decisions.selections.map((selection: any) => selection.option_id);
+    const patch = await model.ask(`design-reference-repair-${state.calls.length}`, 'Repair only the two reference lists. Copy the exact saved lists into before and the supplied authoritative task names and chosen option IDs into after, in the supplied order. Do not change decisions, choose new options, alter behavior or invent evidence. Explain that these lists reconcile references; they do not prove behavior coverage.', { current: { core_tasks: design.scope.core_tasks, decisions: design.decisions }, authoritative: { core_tasks: tasks, decisions: options }, errors: referenceErrors }, DesignReferenceRepair, value => {
+      try { return designErrors({ design: UnifiedDesign.parse(applyDesignReferenceRepair(design, value, tasks, options)), brief: base.brief, decisions }, comparison, base.specs); } catch (error) { return [String(error)]; }
+    });
+    const patchCall = state.calls.at(-1).id, sourceHash = sha(JSON.stringify(design));
+    design = UnifiedDesign.parse(applyDesignReferenceRepair(design, patch, tasks, options));
+    const candidateFile = `reference-repair-candidate-${patchCall}.json`;
+    await write(path.join(dir, candidateFile), design);
+    repairs.push({ call: patchCall, kind: 'authoritative-reference-lists', source_sha256: sourceHash, candidate_sha256: sha(JSON.stringify(design)), candidate_file: candidateFile });
+    review = await model.ask(`design-reference-review-${state.calls.length}`, await model.prompt('review'), { kind: 'unified-design', ...base, comparison, decisions, design, program_errors: [], previous_review: review, correction: patch, instruction: 'Reference names alone do not establish coverage. Verify actual features, flows and acceptance implement every supplied task and choice.' }, Review);
+    await write(path.join(dir, `reference-repair-review-${patchCall}.json`), review);
+    if (review.passed && !review.issues.length) {
+      await write(path.join(dir, 'design-review.json'), review);
+      await write(path.join(run, 'final/final-design.json'), design); await renderDesign(path.join(run, 'final'), design);
+      await write(path.join(dir, 'design-assembly.json'), { provider: model.provider, mode: 'verified fragments with guarded reference repair and whole-design review', fragment_calls: fragmentCalls, repairs, review_call: state.calls.at(-1).id, final_design_sha256: sha(JSON.stringify(design)), fields_generated_by_model: true, templates_used: false });
+      return true;
+    }
+  }
   for (let attempt = 0; attempt < 2; attempt++) {
     const label = `design-text-repair-${state.calls.length}`;
     const patch = await model.ask(label, 'Fix only the saved review issues with exact string replacements at JSON pointer paths relative to the design root, such as /features/3/acceptance/0/then or /pages/2/validation/4. Never prefix paths with /context or /design. Return the smallest set of edits. before must be the entire existing string at that path, after its corrected value. Preserve approved scope, IDs, source references, decisions and all unrelated behavior. Do not regenerate the design.', { design, review, approved_outline: base.brief.market_signals?.approved_high_level }, DesignTextRepair, value => {
@@ -65,7 +85,8 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
     if (!isDeepStrictEqual(joined, saved)) throw new Error('Saved draft differs from its actual model fragments');
     const reviews = (await fs.readdir(dir)).filter(file => file.startsWith(`fragment-review-${round}-`)).sort((a, b) => Number(b.match(/-(\d+)\.json$/)![1]) - Number(a.match(/-(\d+)\.json$/)![1]));
     prior = saved; review = reviews.length ? await json(path.join(dir, reviews[0])) : null; startRound = round + 1;
-    if (review && !designErrors({ design: prior, brief: base.brief, decisions }, comparison, base.specs).length && prior.status === 'final') {
+    const savedErrors = designErrors({ design: prior, brief: base.brief, decisions }, comparison, base.specs);
+    if (review && savedErrors.every(error => /^(Missing core task |Design omits decision |Unknown design decision )/.test(error)) && prior.status === 'final') {
       await repairDesignText(run, state, model, base, comparison, decisions, prior, review, record.fragment_calls); return;
     }
   }
@@ -87,7 +108,7 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
       await write(path.join(dir,'design-assembly.json'),{provider:'codex_cli',mode:'three genuine schema fragments, followed by whole-design auxiliary review',fragment_calls:fragmentCalls,parsed_fragment_sha256:await Promise.all(fragmentCalls.map(async(id:string)=>({id,sha256:await fileSha(path.join(run,'calls',id,'parsed.json'))}))),final_design_sha256:sha(JSON.stringify(design)),review_call:state.calls.at(-1).id,fields_generated_by_model:true,templates_used:false});
       return;
     }
-    if (!errors.length && design.status === 'final') { await repairDesignText(run, state, model, base, comparison, decisions, design, review, fragmentCalls); return; }
+    if (errors.every(error => /^(Missing core task |Design omits decision |Unknown design decision )/.test(error)) && design.status === 'final') { await repairDesignText(run, state, model, base, comparison, decisions, design, review, fragmentCalls); return; }
     prior=design;review.issues.push(...errors.map(error=>({severity:'blocking',location:'program validation',issue:error,correction:'Fix referenced IDs, bounds and required mappings in the next fragments.'})));
   }
   throw new Error('Fragmented design remains draft after two targeted repairs');
