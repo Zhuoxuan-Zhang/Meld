@@ -8,7 +8,7 @@ Run `npm run dev` from the repository root. Frontend: port 4173. Backend: intern
 
 The following describes the earlier four-step studio, preserved at `/?legacy=1`. Its provider endpoints and browser-template export remain available for existing integrations. New project screens use the workflow documented above.
 
-The [interactive design document](../docs/design-doc-interaction.md) is now integrated into Review. It supports real pipeline output, a readable English explanation, feature settings and free text, selectable proposals, confirmation, version recovery and approved developer-design exports. It uses the server’s Codex CLI login separately from optional OpenRouter planning. Market results are handed off as server-owned scan IDs; actual APK files are required for the analysis stage.
+The [interactive design document](../docs/design-doc-interaction.md) is now integrated into Review. It supports real pipeline output, a readable English explanation, feature settings and free text, selectable proposals, confirmation, version recovery and approved developer-design exports. It uses the server’s Claude Code CLI login separately from optional OpenRouter planning. Market results are handed off as server-owned scan IDs; actual APK files are required for the analysis stage.
 
 Choose domains (suggested ones or any words you type), see the hot apps in them from live Google Play market signals with the features their store listings describe, get an AI suggestion for combining features, review the plan, and export an interactive browser demo. You can also select features yourself.
 

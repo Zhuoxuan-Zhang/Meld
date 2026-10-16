@@ -93,7 +93,7 @@ This change implements the interactive design stage and its analysis/app-generat
 
 ## Storage and checks
 
-All generated data stays in ignored `frontend/.meld-cache/`: `signals/` contains immutable scan snapshots; `pipeline/` contains requests, APK checks and analysis runs; `designs/<id>/` contains source snapshots, model attempts, proposals and immutable revisions. Model credentials stay on the server. The default design provider uses the existing Codex CLI login; no browser API key is required.
+All generated data stays in ignored `frontend/.meld-cache/`: `signals/` contains immutable scan snapshots; `pipeline/` contains requests, APK checks and analysis runs; `designs/<id>/` contains source snapshots, model attempts, proposals and immutable revisions. Model credentials stay on the server. The default design provider uses the existing Claude Code CLI login; no browser API key is required.
 
 Proposals are compiled and checked **before** being shown. Confirmation applies those exact selected operations, validates references/choices/flows/acceptance/contrast, reviews consistency, and regenerates the readable projection. Blocking issues leave the current design intact. Jobs reconcile committed receipts after interruption. Original APK analysis and Android source are preserved. Model review assists validation; it is not proof of runtime behavior.
 

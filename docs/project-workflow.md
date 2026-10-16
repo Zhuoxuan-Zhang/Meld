@@ -58,7 +58,7 @@ The build worker plans small Kotlin modules and generates each file separately f
 
 Configure `MELD_ANDROID_SDK` (SDK 35) and `JAVA_HOME` (JDK 17+). The worker produces a **debug APK**. Passing model review and Gradle checks does not establish full runtime behavior; build reports and the UI distinguish device verification. Existing Android source and imported analysis are preserved. A changed design invalidates approval, and an earlier APK is not presented as the current design's result.
 
-All runtime data lives in ignored `frontend/.meld-cache/`. Projects/jobs/profile snapshots/builds are under `workflow/`; validated design workspaces are under `designs/`. Server model calls use the existing Codex CLI login. Credentials and generated run artifacts are excluded from Git.
+All runtime data lives in ignored `frontend/.meld-cache/`. Projects/jobs/profile snapshots/builds are under `workflow/`; validated design workspaces are under `designs/`. Server model calls use the existing Claude Code CLI login. Credentials and generated run artifacts are excluded from Git.
 
 ## Verification
 

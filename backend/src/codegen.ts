@@ -2,6 +2,9 @@ import { z, write, exists, json, WorkbenchError } from "../../pipeline/dist/src/
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
+// executeClaudeCli's saved response.json uses the same envelope shape as Codex's
+// (execution.code, turn_completed, errors, tool_activity, final_text, usage),
+// so this recovery parser works unchanged on artifacts from either provider.
 import { parseCodex } from "../../pipeline/dist/src/codex.js";
 import { fileSha } from "../../pipeline/dist/src/integration.js";
 import { modelJson } from "./model";

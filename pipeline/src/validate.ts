@@ -218,6 +218,13 @@ export async function validateRun(run: string) {
       if (response.execution.code!==0 || !response.turn_completed || response.tool_activity || response.errors.length || !events.some(e=>e.type==='turn.completed') || command.args[command.args.indexOf('--model')+1]!==state.config.model || !isDeepStrictEqual(JSON.parse(response.final_text),parsed)) errors.push(`Unverified Codex CLI result ${call.id}`);
     } catch { errors.push(`Codex CLI execution proof unavailable ${call.id}`); }
   }
+  if (state.config.provider === 'claude_cli') for (const call of state.calls || []) if (call.success) {
+    try {
+      const dir=inside(run,path.join(run,'calls',call.id));
+      const response=await json(path.join(dir,'response.json')),parsed=await json(path.join(dir,'parsed.json')),command=await json(path.join(dir,'command.json'));
+      if (response.execution.code!==0 || !response.turn_completed || response.tool_activity || response.errors.length || command.args[command.args.indexOf('--model')+1]!==state.config.model || !isDeepStrictEqual(JSON.parse(response.final_text),parsed)) errors.push(`Unverified Claude Code CLI result ${call.id}`);
+    } catch { errors.push(`Claude Code CLI execution proof unavailable ${call.id}`); }
+  }
   const result = { passed: errors.length === 0, status: errors.length ? 'INCOMPLETE' : 'LIVE_E2E_PASSED', errors, checked_at: new Date().toISOString(), hard_conflicts: Comparison.safeParse(c).success ? c.conflicts.filter((x: any) => x.kind === 'hard_conflict').length : null };
   await write(path.join(run, 'validation/validation-report.json'), result);
   return result;

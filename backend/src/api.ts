@@ -120,7 +120,12 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
     }
   };
 }
+function claudeCliLoggedIn() {
+  const result = spawnSync("claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
+  if (result.status !== 0) return false;
+  try { return JSON.parse(result.stdout).loggedIn === true; } catch { return true; }
+}
 export function defaultAvailability(env: Record<string, string | undefined>, frontendDir: string) {
   const market = createMarketService(marketOptionsFromEnv(env, frontendDir));
-  return async () => ({ researchAvailable: await market.isAvailable(), designAvailable: spawnSync("codex", ["login", "status"], { timeout: 5000, encoding: "utf8" }).status === 0, buildAvailable: Boolean(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT) });
+  return async () => ({ researchAvailable: await market.isAvailable(), designAvailable: claudeCliLoggedIn(), buildAvailable: Boolean(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT) });
 }
