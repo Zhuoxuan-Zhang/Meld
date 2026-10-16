@@ -35,7 +35,7 @@ test("three-step workflow: idea → research → human choices → design → se
     await page.getByPlaceholder("Describe a feature you’d like to add").fill("Pin important notes");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     expect(api.counts().analysisCalls).toBe(0);
-    await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
+    await page.getByRole("radio").first().check(); await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
     const featureProjectId = new URL(page.url()).searchParams.get("project")!;
     const featureProject = await api.service.get(featureProjectId), preferences = featureProject.featurePreferences;
     const designJob = await api.service.storedJob(featureProject.activeJobId!);
@@ -74,7 +74,7 @@ test("missing APKs continue to the design while progress stays concise across re
   test.setTimeout(60000); const api = await projectServer({ apks: false });
   try {
     await connect(page, api); await page.goto("/"); await page.getByLabel("Describe your app", { exact: true }).fill(idea.input); await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("Search topic", { exact: true }).fill("Productivity"); await page.getByRole("button", { name: "Explore ideas", exact: true }).click();
-    await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
+    await page.getByRole("radio").first().check(); await page.getByRole("button", { name: "Confirm features and generate design" }).click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
     const progress = page.getByLabel("Design generation progress"); await expect(progress).toContainText("Get reference apps"); await expect(progress.locator("li")).toHaveCount(5);
     await expect(progress.locator(".studio-pipeline-apps")).toHaveCount(0); await expect(page.getByText("Check again", { exact: true })).toHaveCount(0); await expect(page.getByRole("button", { name: "Retry failed APK downloads" })).toHaveCount(0);
     await page.reload(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
@@ -118,5 +118,28 @@ for (const width of [390, 1440]) test(`reference cards, screenshots and feature 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
     expect(api.counts().analysisCalls).toBe(0);
+  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+});
+
+test("choose exactly one foundation, keep additions, and restore the selection after reload", async ({ page }) => {
+  const api = await projectServer({ listedFeatures: true });
+  try {
+    await connect(page, api); await page.goto("/");
+    await page.getByLabel("Describe your app", { exact: true }).fill(idea.input);
+    await page.getByText("A few preferences, if you have them").click(); await page.getByLabel("Search topic", { exact: true }).fill("Productivity");
+    await page.getByRole("button", { name: "Explore ideas", exact: true }).click();
+    const confirm = page.getByRole("button", { name: "Confirm features and generate design" }); await expect(confirm).toBeDisabled();
+    const radios = page.getByRole("radio"); await expect(radios).toHaveCount(5);
+    await radios.nth(0).check(); await radios.nth(2).check(); await expect(radios.nth(0)).not.toBeChecked(); await expect(radios.nth(2)).toBeChecked();
+    const names = await page.locator(".studio-market-app h3").allTextContents();
+    await page.getByRole("button", { name: `Explore ${names[1]}`, exact: true }).click();
+    await page.locator(".studio-feature-choice").first().getByRole("checkbox").check(); await expect(radios.nth(2)).toBeChecked();
+    await page.screenshot({ path: "../outputs/base-app-selection.png", fullPage: true });
+    await confirm.click(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
+    const id = new URL(page.url()).searchParams.get("project")!;
+    const saved = await api.service.get(id); const chosen = saved.featurePreferences.baseAppId;
+    expect(chosen).toBeTruthy(); expect(Object.values(saved.featurePreferences.selections).flat()).toHaveLength(1);
+    await page.reload(); await expect(page.locator(".studio-base-summary")).toContainText(names[2]);
+    expect((await api.service.get(id)).featurePreferences.baseAppId).toBe(chosen);
   } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
 });

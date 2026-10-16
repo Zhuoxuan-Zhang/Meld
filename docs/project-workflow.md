@@ -122,3 +122,14 @@ Run `MELD_ANDROID_SDK=/path/to/sdk bash scripts/setup-browser-emulator.sh` with 
 The UI creates a session with `POST /api/projects/:project/builds/:build/emulator`, polls `GET .../emulator/:session`, fetches `GET .../:session/frame`, sends `POST .../:session/input`, and closes with `DELETE .../:session`. The session is bound to its project, successful build and APK hash. One preview uses the device at a time; another project receives a busy response rather than taking over the phone. Sessions expire after ten minutes without requests. Closing removes preview app data; the device stays warm briefly and then stops. Server shutdown stops owned preview devices. QA emulator 5580 is separate.
 
 Implementation follows the [Android Emulator command-line interface](https://developer.android.com/studio/run/emulator-commandline) and [ADB installation and screen capture commands](https://developer.android.com/tools/adb).
+
+
+## Base app and feature merging
+
+Select one of the current top five references as the base app, then choose enhancements from any reference or add custom ideas. The base retains its primary purpose and core user journey without requiring every listed feature to be selected. For example, an Antimine base remains Minesweeper; another game's hint presentation may improve it, but Sudoku is not automatically added as another mode. Branding, advertisements and account systems are not inherited.
+
+`PATCH /api/projects/:id` accepts `featurePreferences: { baseAppId, selections, customRequests }` with `expectedVersion`. The server validates the base against current ranked results. Research changes clear the base; profile snapshots and restores preserve it. The browser requires an explicit choice for new designs; existing API clients and saved projects may omit it for backward compatibility. Choosing “Change base or features” invalidates the current design approval and opens selection again; prior design revisions remain saved.
+
+The pipeline receives `base_app_id`. Server-owned listing metadata becomes `brief.market_signals.foundation`, carried into detailed synthesis, review and the immutable build input. High-level design instructions distinguish the base from additions, request explanations for adaptations/incompatibilities, and ask for clarification before abandoning the base. The user reviews the readable design before approval. These are model instructions and review checks, not a deterministic guarantee of semantic correctness. Inline edits are still user-authored; detailed review must reconcile them with the foundation.
+
+Reference APK preparation is independent of the selected base. Switching the base among the same reference set reuses prepared evidence. Store descriptions remain untrusted market signals, not APK/runtime verification.

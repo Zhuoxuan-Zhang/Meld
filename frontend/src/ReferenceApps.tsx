@@ -15,12 +15,12 @@ function ReferenceScreenshots({ app }: { app: ReferenceApp }) {
   if (!screenshots.length) return <p className="studio-note">Screenshots aren’t available for this app.</p>;
   return <div className="studio-reference-screenshots" role="region" aria-label={`${app.name} store screenshots`} tabIndex={0}>{screenshots.map((url, index) => <img key={url} src={sizedImage(url, "h560")} alt={`${app.name} screenshot ${index + 1}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(current => [...current, url])} />)}</div>;
 }
-type Props = { apps: ReferenceApp[]; selections: Record<string, string[]>; custom: FeatureRequest[]; disabled: boolean; select: (app: string, feature: string, checked: boolean) => void; customize: (app: string, feature: FeatureRequest) => void; selectAll: (app: string, ids: string[]) => void };
-export default function ReferenceApps({ apps, selections, custom, disabled, select, customize, selectAll }: Props) {
+type Props = { baseAppId?: string; chooseBase: (id: string) => void; apps: ReferenceApp[]; selections: Record<string, string[]>; custom: FeatureRequest[]; disabled: boolean; select: (app: string, feature: string, checked: boolean) => void; customize: (app: string, feature: FeatureRequest) => void; selectAll: (app: string, ids: string[]) => void };
+export default function ReferenceApps({ baseAppId, chooseBase, apps, selections, custom, disabled, select, customize, selectAll }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   return <div className="studio-reference-grid">{apps.map((app, index) => {
     const open = expanded === app.id, selected = selections[app.id] || [];
-    return <article className={`studio-market-app studio-reference-card${open ? " is-open" : ""}${selected.length ? " has-selection" : ""}`} key={app.id} aria-label={`Reference app: ${app.name}`}>
+    return <article className={`studio-market-app studio-reference-card${open ? " is-open" : ""}${selected.length ? " has-selection" : ""}${baseAppId === app.id ? " is-base" : ""}`} key={app.id} aria-label={`Reference app: ${app.name}`}>
       <button className="studio-reference-toggle" aria-label={`Explore ${app.name}`} aria-expanded={open} aria-controls={`reference-${app.id}`} onClick={() => setExpanded(open ? null : app.id)}>
         <span className="studio-reference-top"><ReferenceIcon app={app} /><span className="studio-reference-rank">Reference {String(index + 1).padStart(2, "0")}</span>{selected.length > 0 && <span className="studio-reference-selected"><Icon name="Check" size={12} />{selected.length} selected</span>}</span>
         <span className="studio-reference-name"><h3>{app.name}</h3><Icon name={open ? "ChevronUp" : "ArrowUpRight"} size={18} /></span>
@@ -29,6 +29,7 @@ export default function ReferenceApps({ apps, selections, custom, disabled, sele
         <span className="studio-reference-tags">{app.features.slice(0, 2).map(feature => <span key={feature.id}>{custom.find(item => item.id === feature.id)?.name || feature.name}</span>)}{app.features.length > 2 && <span>+{app.features.length - 2}</span>}</span>
         <span className="studio-reference-footer"><span>{app.features.length} features to explore</span><span>{open ? "Close details" : "Choose features"}<Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} /></span></span>
       </button>
+      <label className="studio-base-choice"><input type="radio" name="base-app" aria-label={`Use ${app.name} as base`} checked={baseAppId === app.id} disabled={disabled} onChange={() => chooseBase(app.id)} /><span><strong>{baseAppId === app.id ? "Your base app" : "Use as base"}</strong><small>{baseAppId === app.id ? "Keep its core purpose. Add your selected improvements." : "Build around this app’s main functionality."}</small></span></label>
       {open && <div id={`reference-${app.id}`} className="studio-reference-detail">
         <div className="studio-reference-detail-head"><div><h4>A closer look</h4><p>Screenshots from Google Play</p></div><a className="studio-text-button" href={app.market?.storeUrl} target="_blank" rel="noreferrer">View listing <Icon name="ExternalLink" size={13} /></a></div>
         <ReferenceScreenshots app={app} />

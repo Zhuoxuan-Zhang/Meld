@@ -37,7 +37,7 @@ export type EmulatorSession = { id: string; projectId: string; buildId: string; 
 export type Build = { id: string; revision: string; designHash: string; status: JobStatus; artifacts: { name: string; url: string; sha256: string }[]; validation?: { build: boolean; unitTests: boolean; lint: boolean; runtimeVerified: boolean; limitations: string[] } };
 export type Project = {
   id: string; version: number; createdAt: string; updatedAt: string; brief: Brief;
-  references: Record<string, MarketResult>; featurePreferences: { selections: Record<string, string[]>; customRequests: FeatureRequest[] };
+  references: Record<string, MarketResult>; featurePreferences: { baseAppId?: string; selections: Record<string, string[]>; customRequests: FeatureRequest[] };
   designId: string | null; currentDesignRevision: string | null; approvedRevision: string | null;
   pendingDecision: Decision | null; activeJobId: string | null; latestBuild: Build | null; lastDeliveredBuild?: Build;
   referencePreparationId?: string; referencePreparation?: { id: string; status: JobStatus; phase: string; progress?: PipelineProgress };
