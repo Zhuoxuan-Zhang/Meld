@@ -30,6 +30,52 @@
 @container workspace (max-width:22rem){.studio-domain-grid{grid-template-columns:1fr}}
 
 /* Workspace panels use the available width; prose keeps a readable measure. */
+/* Loading indicators reflect active requests and completed summaries. */
+.studio-scan-row > div { flex: 1; }
+.studio-loading-progress {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #e6cbbb;
+  border-radius: 10px;
+  background: #fff7f0;
+}
+.studio-loading-heading { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; color: #8f3928; }
+.studio-loading-heading > strong { flex: 1; min-width: 9rem; font-size: 12px; }
+.studio-loading-heading > svg { flex-shrink: 0; }
+.studio-loading-time { font-size: 10px; color: var(--soft); font-variant-numeric: tabular-nums; }
+.studio-loading-progress p { font-size: 11px; line-height: 1.6; color: #655749; }
+.studio-loading-progress .studio-loading-count { font-weight: 700; color: var(--text); }
+.studio-loading-track, .studio-loading-progress progress {
+  display: block;
+  width: 100%;
+  height: 5px;
+  margin: 13px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #edddcf;
+}
+.studio-loading-track > span { display: block; width: 40%; height: 100%; background: var(--accent); border-radius: inherit; animation: studio-loading-slide 1.6s ease-in-out infinite alternate; }
+.studio-loading-track.is-queued > span { animation: none; opacity: .5; }
+.studio-loading-progress progress { appearance: none; accent-color: var(--accent); }
+.studio-loading-progress progress::-webkit-progress-bar { background: #edddcf; border-radius: 8px; }
+.studio-loading-progress progress::-webkit-progress-value { background: var(--accent); border-radius: 8px; }
+.studio-loading-progress progress::-moz-progress-bar { background: var(--accent); border-radius: 8px; }
+.studio-loading-spinner { animation: studio-spin 1.2s linear infinite; }
+.studio-summary-notice { margin: 0 18px 18px; padding: 13px; border: 1px solid #e6cbbb; border-radius: 9px; background: #fff7f0; }
+.studio-summary-notice > div { display: flex; align-items: flex-start; gap: 9px; }
+.studio-summary-notice svg { flex-shrink: 0; color: #8f3928; }
+.studio-summary-notice strong { display: block; font-size: 12px; color: #8f3928; }
+.studio-summary-notice p { margin: 5px 0 0; font-size: 11px; line-height: 1.6; color: #655749; }
+.studio-summary-notice[data-phase="queued"], .studio-summary-notice[data-phase="pending"] { background: #f7f6f2; border-color: #e4e2dc; }
+.studio-summary-notice[data-phase="paused"], .studio-summary-notice[data-phase="unavailable"] { background: #fff0ec; border-color: #deb2a6; }
+.studio-summary-notice .studio-text-button { margin-top: 6px; padding-bottom: 0; }
+.studio-summary-complete { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #356347; }
+@keyframes studio-loading-slide { from { transform: translateX(0); } to { transform: translateX(150%); } }
+@media (prefers-reduced-motion: reduce) {
+  .studio-loading-spinner, .studio-loading-track > span { animation: none; }
+}
+
 /* Keep the selected features beside the reference apps while browsing. */
 .studio-selection-layout {
   display: grid;
@@ -63,3 +109,15 @@
     padding: var(--panel-padding);
   }
 }
+
+/* User-selected foundation for the app. */
+.studio-base-choice { display: flex; align-items: flex-start; gap: 10px; padding: 15px 18px; border-top: 1px solid #e3e8df; cursor: pointer; background: #f4f8f2; }
+.studio-base-choice input { margin-top: 3px; accent-color: #376348; flex-shrink: 0; }
+.studio-base-choice span { min-width: 0; }
+.studio-base-choice strong, .studio-base-choice small { display: block; }
+.studio-base-choice strong { font-size: 13px; color: #284f38; }
+.studio-base-choice small { margin-top: 5px; color: #4a5d4e; line-height: 1.5; font-size: 12px; }
+.studio-base-summary { margin: 20px 0; padding: 14px; background: #edf3e9; border-radius: 12px; }
+.studio-base-summary > p:last-child { font-size: 12px; margin-bottom: 0; }
+.studio-foundation-banner { margin: 20px 0; padding: 16px 20px; border-left: 3px solid #46745b; background: #f4f8f2; border-radius: 8px; }
+.studio-foundation-banner p { margin: 6px 0 0; font-size: 13px; }

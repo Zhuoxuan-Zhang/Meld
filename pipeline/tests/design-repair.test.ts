@@ -29,3 +29,13 @@ it('recognizes plain text palette roles while enforcing actual text contrast', (
   expect(paletteErrors(palette)).toEqual([]);
   expect(paletteErrors(palette.map(token => token.role === 'text' ? { ...token, value: '#FFF8F0' } : token))).toContain('Insufficient contrast textPrimary/background');
 });
+
+it('reconciles draft reference lists only against exact authoritative tasks and selected options', async () => {
+  const { applyDesignReferenceRepair } = await import('../src/design-repair.js');
+  const draft = { scope: { core_tasks: ['Import a photo'] }, decisions: ['Use JPEG because it is compact'], features: [{ id: 'import', behavior: 'Choose a device photo' }] };
+  const patch = { core_tasks: { before: draft.scope.core_tasks, after: ['Select an image from the device.'] }, decisions: { before: draft.decisions, after: ['option-jpeg'] }, reason: 'Align reference lists; actual behavior still requires review.' };
+  const result = applyDesignReferenceRepair(draft, patch, patch.core_tasks.after, ['option-jpeg']);
+  expect(result.features).toEqual(draft.features); expect(result.decisions).toEqual(['option-jpeg']); expect(draft.decisions).toEqual(['Use JPEG because it is compact']);
+  expect(() => applyDesignReferenceRepair(draft, patch, patch.core_tasks.after, ['option-png'])).toThrow('approved tasks');
+  expect(() => applyDesignReferenceRepair(draft, { ...patch, decisions: { before: [], after: ['option-jpeg'] } }, patch.core_tasks.after, ['option-jpeg'])).toThrow('saved draft');
+});

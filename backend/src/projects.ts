@@ -1,3 +1,4 @@
+import { assessFit } from "../../frontend/src/feasibility";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -15,7 +16,7 @@ import type { Project, Job, Brief, ChangeProposal, Build, Conflict } from "../..
 const key = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/);
 export const BriefInput = z.object({ name: z.string().max(60).default(""), input: z.string().trim().min(1).max(6000), audience: z.string().max(600).default(""), purpose: z.string().max(600).default(""), goal: z.string().max(600).default(""), style: z.enum(["warm", "sage", "ink"]).default("warm"), domains: z.array(z.string().trim().min(1).max(48)).max(8).default([]), coreTasks: z.array(z.string().trim().min(1).max(80)).min(1).max(12).optional(), requiredStates: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).min(1).max(6).optional() }).strict();
 export const CreateProject = z.object({ requestKey: key, brief: BriefInput, exampleId: key.optional() }).strict();
-export const FeaturePreferences = z.object({ selections: z.record(z.string().min(1).max(240), z.array(z.string().min(1).max(240)).max(20)), customRequests: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,239}$/), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(20) }).strict();
+export const FeaturePreferences = z.object({ baseAppId: z.string().min(1).max(240).optional(), selections: z.record(z.string().min(1).max(240), z.array(z.string().min(1).max(240)).max(20)), customRequests: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,239}$/), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(20) }).strict();
 export const PatchProject = z.object({ expectedVersion: z.number().int().positive(), brief: BriefInput.optional(), featurePreferences: FeaturePreferences.optional() }).strict();
 export const Action = z.object({ requestKey: key, expectedVersion: z.number().int().positive() }).strict();
 export const ChangeAction = Action.extend({ baseRevision: key, text: z.string().max(6000).default(""), edits: ChangeRequest.shape.edits });
@@ -117,12 +118,13 @@ export class ProjectService {
       if (input.featurePreferences) {
         const catalog = buildCatalog(project.brief.domains, project.references, {});
         const apps = new Map(catalog.map(app => [app.id, app]));
+        if (input.featurePreferences.baseAppId && !catalog.some(app => app.id === input.featurePreferences!.baseAppId && app.market && !app.market.retained && assessFit(app.market, app.domain).level !== "complex")) throw new WorkbenchError("invalid_base_app", "Choose an eligible base app from your current references.", 422);
         for (const [appId, ids] of Object.entries(input.featurePreferences.selections)) if (!apps.has(appId) || ids.some(id => !apps.get(appId)!.features.some(f => f.id === id) && !input.featurePreferences!.customRequests.some(f => f.id === id && id.startsWith(`${appId}:`)))) throw new WorkbenchError("invalid_feature", "Choose features from this project's reference apps.", 422);
         if (Object.values(input.featurePreferences.selections).flat().length > 100 || new Set(input.featurePreferences.customRequests.map(f => f.id)).size !== input.featurePreferences.customRequests.length) throw new WorkbenchError("invalid_feature", "Keep feature choices unique and within the project limit.", 422);
         project.featurePreferences = input.featurePreferences; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       if (input.brief) {
-        if (semanticHash(project.brief.domains) !== semanticHash(input.brief.domains) || project.brief.input !== input.brief.input) { project.needsResearch = true; project.references = {}; delete project.referencePreparationId; delete project.referencePreparation; project.featurePreferences.selections = {}; }
+        if (semanticHash(project.brief.domains) !== semanticHash(input.brief.domains) || project.brief.input !== input.brief.input) { project.needsResearch = true; project.references = {}; delete project.referencePreparationId; delete project.referencePreparation; project.featurePreferences.selections = {}; delete project.featurePreferences.baseAppId; }
         project.brief = input.brief; delete project.highLevelDesign; delete project.highLevelFeedback;
       }
       project.version++; project.needsDesign = true; project.approvedRevision = null; project.pendingDecision = null; project.activeJobId = null;
@@ -176,7 +178,7 @@ export class ProjectService {
       for (const scan of result.references) references[scan.domain] = await this.options.signals.record(scan);
       if (!Object.values(references).some(scan => scan.apps.length)) throw new WorkbenchError("no_references", "No reference apps matched. Try a broader description.", 422);
       await this.finish(job, async p => {
-        p.brief = result.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.approvedRevision = null; p.pendingDecision = null; p.featurePreferences.selections = {}; delete p.referencePreparationId; delete p.referencePreparation;
+        p.brief = result.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.approvedRevision = null; p.pendingDecision = null; p.featurePreferences.selections = {}; delete p.featurePreferences.baseAppId; delete p.referencePreparationId; delete p.referencePreparation;
         if (this.options.prepareReferences) await this.prepareReferencesFor(p);
       });
     });
@@ -241,7 +243,7 @@ export class ProjectService {
       const approvedFeatures = approved?.features.map(feature => ({ id: feature.id, name: feature.title, description: feature.summary })) || [];
       const featureRequests = [...new Map([...chosen, ...project.featurePreferences.customRequests, ...approvedFeatures].map(feature => [feature.id, feature])).values()];
       const pipeline = await this.pipeline.submit(DesignInput.parse({ request_key: job.id, scan_ids: Object.values(project.references).map(scan => scan.scanId), brief: { name: project.brief.name || "My app", audience: project.brief.audience, purpose: project.brief.purpose || project.brief.input.slice(0, 600), goal: project.brief.goal, style: project.brief.style, coreTasks: project.brief.coreTasks, requiredStates: project.brief.requiredStates },
-        preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: (approved ? approvedFeatures : featureRequests).map(f => f.id), feature_requests: featureRequests, ...(approvedOutline ? { approved_outline: approvedOutline } : {}) }), project.referencePreparationId ? { referenceJobId: project.referencePreparationId } : undefined);
+        base_app_id: project.featurePreferences.baseAppId, preferences: Object.entries(project.featurePreferences.selections).filter(([, ids]) => ids.length).map(([app_id, feature_ids]) => ({ app_id, feature_ids })), requested_features: (approved ? approvedFeatures : featureRequests).map(f => f.id), feature_requests: featureRequests, ...(approvedOutline ? { approved_outline: approvedOutline } : {}) }), project.referencePreparationId ? { referenceJobId: project.referencePreparationId } : undefined);
       job.pipelineJobId = pipeline.id; await this.saveJob(job); await this.watchPipeline(job);
   }
   async watchPipeline(job: StoredJob) {

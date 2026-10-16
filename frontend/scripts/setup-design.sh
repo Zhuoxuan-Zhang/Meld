@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-backend_revision="ab005dd"
+backend_revision="e54dd1c6777ff039b81863c4d178faad2f3f2884"
 if [ -f "$PWD/pipeline/src/integration.ts" ] && [ -d "$PWD/backend" ]; then
   backend_dir="$PWD"
 else
@@ -19,7 +19,7 @@ pipeline_dir="$backend_dir/pipeline"
 # Newer upstream includes the scope-aware engine. Preserve the local merged
 # selection guidance; replaying older patches would conflict with this version.
 if [ ! -f "$backend_dir/backend/src/high-level.ts" ]; then
-  echo "Update the backend checkout to origin/zhuoxuan (ab005dd or later)."
+  echo "Update the backend checkout to origin/zhuoxuan (e54dd1c or later)."
   exit 1
 fi
 workflow_patch="$PWD/frontend/patches/meld-workflow.patch"

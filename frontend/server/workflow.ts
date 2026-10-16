@@ -10,10 +10,10 @@ import { assessFit } from "../src/feasibility";
 import type { ApiPlugin } from "./design-http";
 
 const Feature = z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,239}$/), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict();
-export const Handoff = z.object({ requestKey: z.string().uuid(), projectId: z.string().regex(/^project-[a-f\d-]{36}$/).optional(), expectedVersion: z.number().int().positive().optional(), brief: BriefInput, scanIds: z.array(z.string().regex(/^scan-[a-f\d]{64}$/)).min(1).max(2), references: z.array(z.object({ appId: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), features: z.array(Feature).min(1).max(6) }).strict()).min(1).max(5), customFeatures: z.array(Feature).max(20).optional() }).strict().refine(input => {
+export const Handoff = z.object({ requestKey: z.string().uuid(), projectId: z.string().regex(/^project-[a-f\d-]{36}$/).optional(), expectedVersion: z.number().int().positive().optional(), baseAppId: z.string().min(1).max(240).optional(), brief: BriefInput, scanIds: z.array(z.string().regex(/^scan-[a-f\d]{64}$/)).min(1).max(2), references: z.array(z.object({ appId: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), features: z.array(Feature).max(6) }).strict()).min(1).max(5), customFeatures: z.array(Feature).max(20).optional() }).strict().refine(input => {
   const ids = [...input.references.flatMap(app => app.features.map(f => f.id)), ...(input.customFeatures || []).map(f => f.id)];
   return ids.length <= 20 && new Set(ids).size === ids.length && Boolean(input.projectId) === (input.expectedVersion !== undefined);
-}, "Choose up to 20 distinct features.");
+}, "Choose up to 20 distinct features.").refine(input => (!input.baseAppId || input.references.some(app => app.appId === input.baseAppId)) && input.references.every(app => app.features.length > 0 || app.appId === input.baseAppId), "Choose a base from your reference apps and features for each enhancement app.");
 
 // Imported listings always come from immutable server snapshots. Feature text
 // is saved separately as explicit user preferences, never as APK evidence.
@@ -48,7 +48,7 @@ export async function importSelection(service: ProjectService, signals: SignalsS
       await service.snapshotProfile(p);
       p.brief = input.brief; p.references = references; p.needsResearch = false; p.needsDesign = true; p.pendingDecision = null; p.approvedRevision = null;
       delete p.highLevelDesign; delete p.highLevelFeedback; delete p.referencePreparationId; delete p.referencePreparation;
-      p.featurePreferences = { selections: Object.fromEntries(input.references.map(a => [a.appId, a.features.map(f => f.id)])), customRequests: [...input.references.flatMap(a => a.features), ...(input.customFeatures || [])] };
+      p.featurePreferences = { ...(input.baseAppId ? { baseAppId: input.baseAppId } : {}), selections: Object.fromEntries(input.references.map(a => [a.appId, a.features.map(f => f.id)])), customRequests: [...input.references.flatMap(a => a.features), ...(input.customFeatures || [])] };
       p.version++;
     }, input.expectedVersion ?? project.version);
     await write(file, { signature, id: project.id });

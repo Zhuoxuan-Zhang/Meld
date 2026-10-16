@@ -6,7 +6,7 @@ import path from "node:path";
 const run = path.resolve(process.argv[2]), directory = path.join(run, "validation/wireframe-inspection");
 await mkdir(directory, { recursive: true });
 const html = await readFile(path.join(run, "final/wireframes.html"), "utf8"), design = JSON.parse(await readFile(path.join(run, "final/final-design.json"), "utf8"));
-const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE || "/home/zhuoxuan/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome" });
+const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE });
 const checks = {}, problems = [];
 try {
   const page = await browser.newPage();

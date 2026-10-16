@@ -42,11 +42,15 @@ test("upstream studio clarifies, searches beyond five apps, keeps customized fea
     await page.getByLabel("Feature name", { exact: true }).fill("Capture class notes");
     await page.getByLabel("How should it work?", { exact: true }).fill("Save plain text on this phone.");
     await page.getByLabel("Your own feature idea", { exact: true }).fill("Pin a note"); await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("radio", { name: "Use Notes 7 as base", exact: true }).check();
     await page.reload(); await expect(page.locator(".studio-reference-card")).toHaveCount(8);
+    await expect(page.getByRole("radio", { name: "Use Notes 7 as base", exact: true })).toBeChecked();
     await expect(page.getByRole("button", { name: "Clear all features from Notes Daily", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Confirm features and generate design" }).click();
     await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible();
     expect(server.received[0].featurePreferences.customRequests).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Capture class notes", description: "Save plain text on this phone." }), expect.objectContaining({ name: "Pin a note" })]));
+    expect(server.received[0].featurePreferences.baseAppId).toBe("com.example.notes7");
+    expect(Object.values(server.received[0].references).flatMap(scan => scan.apps.map(a => a.appId))).toContain("com.example.notes7");
     expect(server.received[0].brief.input).toContain("Confirmed scope: Offline study notes");
     expect(server.counts()).toEqual({ analysisCalls: 0, buildCalls: 0 });
     await page.getByRole("button", { name: "Edit App summary", exact: true }).dblclick();

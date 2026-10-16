@@ -12,6 +12,12 @@ export function parseCodex(response: any, schema: z.ZodType<any>, outputLimit: n
   return schema.parse(JSON.parse(response.final_text));
 }
 
+// A server output-limit failure cannot recover by reconnecting to the same
+// oversized generation. Let the caller retry with a smaller response instead.
+export function isCodexOutputLimitError(line: string): boolean {
+  try { const event = JSON.parse(line); return event.type === 'error' && typeof event.message === 'string' && /reason:\s*max_output_tokens/.test(event.message); } catch { return false; }
+}
+
 // Fresh ephemeral context; REA remains in the serial orchestrator.
 export async function executeCodex(dir: string, request: any, timeout: number, signal?: AbortSignal) {
   signal?.throwIfAborted();
@@ -34,7 +40,7 @@ export async function executeCodex(dir: string, request: any, timeout: number, s
       // cancellation cannot leave that child running with the pipes open.
       const detached = process.platform !== 'win32';
       const child = spawn('codex', args, {cwd,env,detached,stdio:['pipe','pipe','pipe']});
-      let timedOut = false, exceeded = false;
+      let timedOut = false, exceeded = false, outputLimitReached = false, eventBuffer = '';
       const stop = () => {
         if (detached && child.pid) {
           try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
@@ -47,14 +53,21 @@ export async function executeCodex(dir: string, request: any, timeout: number, s
       signal?.addEventListener('abort', abort, { once: true });
       const collect = (stream: 'out'|'err', chunk: Buffer) => {
         if (Buffer.byteLength(stdout)+Buffer.byteLength(stderr)+chunk.length > 16*1024*1024) { exceeded = true; stop(); return; }
-        if (stream === 'out') stdout += chunk.toString(); else stderr += chunk.toString();
+        if (stream === 'out') {
+          const text = chunk.toString(); stdout += text; eventBuffer += text;
+          let newline: number;
+          while ((newline = eventBuffer.indexOf('\n')) >= 0) {
+            const line = eventBuffer.slice(0, newline); eventBuffer = eventBuffer.slice(newline + 1);
+            if (!outputLimitReached && isCodexOutputLimitError(line)) { outputLimitReached = true; stop(); }
+          }
+        } else stderr += chunk.toString();
       };
       child.stdout.on('data',chunk=>collect('out',chunk)); child.stderr.on('data',chunk=>collect('err',chunk));
       child.stdin.on('error',()=>{}); child.stdin.end(request.prompt);
       child.once('error',error=>{cleanup();reject(error);});
       child.once('close',(code,exitSignal)=>{cleanup();
         if (signal?.aborted) reject(signal.reason);
-        else resolve({code,signal:exitSignal,timedOut,exceeded,elapsed_ms:Date.now()-start});
+        else resolve({code,signal:exitSignal,timedOut,exceeded,outputLimitReached,elapsed_ms:Date.now()-start});
       });
     });
     await write(path.join(dir,'events.jsonl'),redact(stdout));

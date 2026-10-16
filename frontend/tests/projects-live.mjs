@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 const base = process.env.MELD_BASE_URL || "http://127.0.0.1:4173", directory = "qa-screenshots/project-flow";
 await mkdir(directory, { recursive: true });
-const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE || "/home/zhuoxuan/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome" });
+const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
 const errors = []; page.on("pageerror", error => errors.push(error.message));
 try {

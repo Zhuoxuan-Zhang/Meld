@@ -39,11 +39,20 @@ describe('evidence and decision risk validation (isolated fixtures)', () => {
 
 import { Claude, parseMessage, parseResponse } from '../src/claude.js';
 import { parseCodex } from '../src/codex.js';
+import { parseClaudeCli } from '../src/claude-cli.js';
 import { report } from '../src/state.js';
 import { z } from 'zod';
 it('does not apply API dollar prices to ChatGPT-authenticated CLI usage', async () => {
   const root=await mkdtemp(path.join(os.tmpdir(),'mvp-codex-usage-'));
   const state:any={status:'partial',stages:{},config:{provider:'codex_cli',model:'fixture',max_calls:40,pricing:{source:'subscription fixture'}},calls:[{usage:{input_tokens:1000000,output_tokens:1000}}]};
+  await report(root,state);
+  expect(state.usage.estimated_usd).toBeNull();
+  expect(state.usage.input_tokens).toBe(1000000);
+  expect(await readFile(path.join(root,'report.md'),'utf8')).toContain('subscription charge: unknown');
+});
+it('does not apply API dollar prices to Claude Code CLI usage', async () => {
+  const root=await mkdtemp(path.join(os.tmpdir(),'mvp-claude-cli-usage-'));
+  const state:any={status:'partial',stages:{},config:{provider:'claude_cli',model:'fixture',max_calls:40,pricing:{source:'subscription fixture'}},calls:[{usage:{input_tokens:1000000,output_tokens:1000}}]};
   await report(root,state);
   expect(state.usage.estimated_usd).toBeNull();
   expect(state.usage.input_tokens).toBe(1000000);
@@ -57,6 +66,15 @@ it('accepts only a completed tool-free Codex turn within the output limit (isola
   expect(()=>parseCodex({...response,turn_completed:false},schema,20)).toThrow('Incomplete');
   expect(()=>parseCodex({...response,tool_activity:true},schema,20)).toThrow('outside');
   expect(()=>parseCodex(response,schema,10)).toThrow('token limit');
+});
+it('accepts only a completed tool-free Claude Code turn within the output limit (isolated CLI fixtures)', () => {
+  const schema=z.object({ok:z.boolean()});
+  const response={execution:{code:0},turn_completed:true,errors:[],tool_activity:false,usage:{output_tokens:12},final_text:'{"ok":true}'};
+  expect(parseClaudeCli(response,schema,20)).toEqual({ok:true});
+  expect(()=>parseClaudeCli({...response,execution:{code:1}},schema,20)).toThrow('Incomplete');
+  expect(()=>parseClaudeCli({...response,turn_completed:false},schema,20)).toThrow('Incomplete');
+  expect(()=>parseClaudeCli({...response,tool_activity:true},schema,20)).toThrow('outside');
+  expect(()=>parseClaudeCli(response,schema,10)).toThrow('token limit');
 });
 it('rejects truncated, refused and malformed model responses', () => {
   const schema=z.object({ok:z.boolean()});
@@ -184,4 +202,12 @@ it('renders game palettes and accent controls without inherited notes context', 
   expect(html).toContain('--accent:#2357C6');
   expect(html).not.toContain('normal · Notes');
   expect(controls({ design: d, brief: {}, decisions: { selections: [] } } as any).find(control => control.id === 'primary-color')?.value).toBe('#2357C6');
+});
+
+it('detects an explicit Codex server output-limit error without matching generated content or other network errors', async () => {
+  const { isCodexOutputLimitError } = await import('../src/codex.js');
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'error', message: 'Reconnecting... (Incomplete response returned, reason: max_output_tokens)' }))).toBe(true);
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'reason: max_output_tokens' } }))).toBe(false);
+  expect(isCodexOutputLimitError(JSON.stringify({ type: 'error', message: 'Connection reset' }))).toBe(false);
+  expect(isCodexOutputLimitError('incomplete JSON')).toBe(false);
 });

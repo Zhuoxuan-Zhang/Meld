@@ -30,9 +30,13 @@ async function integrated() {
 test("import keeps the chosen app and exact features, rejects foreign features, and is idempotent", async () => {
   const api = await integrated();
   try {
-    const body = Handoff.parse({ ...handoffBody(api.draft), requestKey: randomUUID() });
+    const body = Handoff.parse({ ...handoffBody({ ...api.draft, baseAppId: "com.example.notes" }), requestKey: randomUUID() });
     const project = await importSelection(api.service, api.signals, body);
     expect(project.needsResearch).toBe(false);
+    expect(project.featurePreferences.baseAppId).toBe("com.example.notes");
+    expect(Handoff.safeParse({ ...body, baseAppId: "com.example.foreign" }).success).toBe(false);
+    const baseOnly = Handoff.parse({ ...handoffBody({ ...api.draft, baseAppId: "com.example.notes", selected: {} }), requestKey: randomUUID() });
+    expect((await importSelection(api.service, api.signals, baseOnly)).featurePreferences).toMatchObject({ baseAppId: "com.example.notes", selections: { "com.example.notes": [] }, customRequests: [] });
     expect(Object.values(project.references).flatMap(s => s.apps.map(a => a.appId))).toEqual(["com.example.notes"]);
     expect(project.featurePreferences.customRequests).toEqual(body.references[0].features);
     expect(project.brief.input).toBe(api.draft.goal);
@@ -53,7 +57,7 @@ test("import keeps the chosen app and exact features, rejects foreign features, 
 test("research edits keep the saved project and design history, reject stale versions, and invalidate the old delivery", async () => {
   const api = await integrated();
   try {
-    const body = Handoff.parse({ ...handoffBody(api.draft), requestKey: randomUUID() });
+    const body = Handoff.parse({ ...handoffBody({ ...api.draft, baseAppId: "com.example.notes" }), requestKey: randomUUID() });
     const old = await api.service.create({ requestKey: randomUUID(), brief: body.brief, exampleId: "notes" });
     const updatedBody = Handoff.parse({ ...body, projectId: old.id, expectedVersion: old.version, brief: { ...body.brief, name: "Study Notes", input: "Revised student notebook" }, customFeatures: [{ id: "custom-pin", name: "Pin notes", description: "Pin one note locally." }] });
     const updated = await importSelection(api.service, api.signals, updatedBody);

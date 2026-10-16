@@ -16,7 +16,7 @@ export const IntentOutput = z.object({
   plan: z.object({ summary: text, audience: text, features: z.array(z.object({ name: z.string().min(1).max(120), terms: z.array(z.string().min(2).max(80)).min(1).max(5) }).strict()).min(1).max(5), exclusions: z.array(text).max(6), assumptions: z.array(text).max(6), topics: z.array(z.object({ domain: z.string().trim().min(1).max(48), queries: z.array(z.string().trim().min(2).max(120)).min(1).max(4) }).strict()).min(1).max(2) }).strict().nullable(),
 }).strict();
 type Clarify = (input: z.infer<typeof IntentInput>, signal: AbortSignal) => Promise<IntentReply>;
-export function intentApi(directory: string, clarify?: Clarify, probe = () => spawnSync("codex", ["login", "status"], { timeout: 5000, stdio: "ignore" }).status === 0): ApiPlugin {
+export function intentApi(directory: string, clarify?: Clarify, probe = () => spawnSync("claude", ["auth", "status"], { timeout: 5000, stdio: "ignore" }).status === 0): ApiPlugin {
   const active = new Set<AbortController>();
   const run: Clarify = clarify || (async (input, signal) => {
     const instructions = await readFile(new URL("../prompts/idea-clarification/prompt.md", import.meta.url), "utf8");

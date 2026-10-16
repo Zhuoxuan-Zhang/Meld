@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import IntentPanel from "./IntentPanel";
 import ReferenceApps, { FeatureMix } from "./ReferenceApps";
+import type { FeatureSummaryStatus } from "./ReferenceApps";
+import DiscoveryProgress from "./DiscoveryProgress";
 import { Icon } from "./icons";
 import { domains, canonicalDomain } from "./data";
+import type { ReferenceApp } from "./data";
 import { emptyDraft, loadDraft, storageKey, catalog, startDiscovery, withMarketResult, withListedFeatures } from "./state";
 import type { Draft } from "./state";
 import { buildCatalog, referenceFit } from "./market";
@@ -30,7 +33,7 @@ export default function StudioDiscovery({ initialBrief, projectId, busy, confirm
   useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify(draft)); } catch { setError("This browser could not save your choices. Keep this page open while you continue."); } }, [draft]);
   function update(patch: Partial<Draft>) {
     setDraft(d => ({ ...d, ...patch,
-      ...(patch.domains || Object.hasOwn(patch, "intent") ? { customFeatures: [], selected: {} } : {}),
+      ...(patch.domains || Object.hasOwn(patch, "intent") ? { customFeatures: [], selected: {}, baseAppId: undefined } : {}),
       ...(patch.domains && !Object.hasOwn(patch, "intent") ? { market: {}, selected: {}, discoveryStarted: false } : {}),
       ...(Object.hasOwn(patch, "intent") && !patch.intent?.approved ? {
         discoveryStarted: false,
@@ -57,9 +60,19 @@ export default function StudioDiscovery({ initialBrief, projectId, busy, confirm
   const hidden = all.filter(a => !visibleIds.has(a.id));
   const shown = rankForIntent(eligible, plan).filter(a => `${a.name} ${a.tagline} ${a.features.map(f => `${f.name} ${f.description}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   const custom = draft.customFeatures || [];
-  const selectedCount = Object.values(draft.selected).filter(ids => ids.length).length;
+  const baseApp = all.find(a => a.id === draft.baseAppId);
+  const selectedCount = new Set([...Object.entries(draft.selected).filter(([, ids]) => ids.length).map(([id]) => id), ...(draft.baseAppId ? [draft.baseAppId] : [])]).size;
   const selectedFeatureIds = new Set(Object.values(draft.selected).flat());
   const own = custom.filter(f => !all.some(a => a.features.some(item => item.id === f.id)));
+  function summaryStatus(app: ReferenceApp): FeatureSummaryStatus {
+    const names = [app.domain, ...(app.alsoIn || [])];
+    const active = names.map(name => listing.states[name]).find(state => state?.phase === "running" && state.appIds.includes(app.id));
+    if (active?.phase === "running") return { phase: active.queued ? "queued" : "loading" };
+    const failed = names.find(name => listing.states[name]?.phase === "error");
+    if (failed) return { phase: "paused", retry: () => void listing.retry(failed) };
+    if (listing.connection?.available === false) return { phase: "unavailable", retry: () => void listing.check() };
+    return { phase: listing.connection?.available ? "queued" : "pending" };
+  }
   function selectAll(appId: string, ids: string[]) {
     update({ selected: { ...draft.selected, [appId]: ids }, customFeatures: custom.filter(f => !all.find(a => a.id === appId)?.features.some(item => item.id === f.id) || ids.includes(f.id)) });
   }
@@ -90,18 +103,26 @@ export default function StudioDiscovery({ initialBrief, projectId, busy, confirm
         {draft.domains.map(name => {
           const scan = draft.market?.[name], pending = market.scans[name], summaries = listing.states[name];
           const fits = scan?.apps.filter(a => eligible.some(e => e.id === a.appId)).length || 0;
-          return <div className="studio-scan-row" key={name}><div><strong>{name}</strong><p className="studio-note" role="status">{pending?.phase === "scanning" ? "Searching Google Play…" : pending?.phase === "error" ? pending.message : scan ? `${fits} shown · ${scan.ranked} ranked${scan.failedRequests ? " · some requests failed" : ""}` : "Waiting for app search"}</p>{summaries?.phase === "running" && <p role="status" className="studio-note">Reading store listings… Feature summaries are still processing.</p>}{summaries?.phase === "error" && <p role="alert" className="studio-note">{summaries.message} <button className="studio-text-button" onClick={() => void listing.retry(name)}>Retry feature summaries</button></p>}{scan?.warnings.map(warning => <p key={warning} className="studio-note">{warning}</p>)}</div><button className="studio-text-button" disabled={pending?.phase === "scanning"} onClick={() => void market.scan(name, true)}>{pending?.phase === "error" ? "Retry search" : "Rescan"}</button></div>;
+          const summaryApps = scan?.apps.filter(a => !a.retained && a.description !== undefined && visibleIds.has(a.appId)) || [];
+          const completed = summaryApps.filter(a => a.listedFeatures).length;
+          return <div className="studio-scan-row" key={name}><div><strong>{name}</strong>
+            <p className="studio-note" role="status">{pending?.phase === "scanning" ? (pending.queued ? "Waiting to search Google Play…" : "Searching Google Play…") : pending?.phase === "error" ? pending.message : scan ? `${fits} shown · ${scan.ranked} ranked${scan.failedRequests ? " · some requests failed" : ""}` : "Waiting for app search"}</p>
+            <DiscoveryProgress domain={name} search={pending} summaries={summaries} completed={completed} total={summaryApps.length} />
+            {!pending && !summaries && summaryApps.length > 0 && completed === summaryApps.length && <p className="studio-summary-complete"><Icon name="CircleCheck" size={16} />All {completed} app summaries ready</p>}
+            {summaries?.phase === "error" && <p role="alert" className="studio-note">{summaries.message} <button className="studio-text-button" onClick={() => void listing.retry(name)}>Retry feature summaries</button></p>}
+            {scan?.warnings.map(warning => <p key={warning} className="studio-note">{warning}</p>)}
+          </div><button className="studio-text-button" disabled={pending?.phase === "scanning"} onClick={() => void market.scan(name, true)}>{pending?.phase === "error" ? "Retry search" : "Rescan"}</button></div>;
         })}
         <div className="studio-form-grid"><label>Find an app or feature<input value={query} onChange={e => setQuery(e.target.value)} /></label><label>App complexity<select value={draft.complexity ?? defaultComplexity} onChange={e => update({ complexity: e.target.value as Draft['complexity'] })}><option value="review">Include apps needing review</option><option value="simple">Simple apps only</option></select></label></div>
         {hidden.length > 0 && <details className="studio-details"><summary>See what was filtered out ({hidden.length})</summary>{hidden.map(a => <p key={a.id}><strong>{a.name}</strong> — {referenceFit(a).reason}</p>)}</details>}
         {!shown.length && draft.domains.every(name => draft.market?.[name] && market.scans[name]?.phase !== "scanning") && <p role="status">{all.length ? "Apps were found, but none match these filters. Adjust the filter or your search." : "No apps were found for this search. Try another domain or rescan."}</p>}
         {!listing.connection?.available && eligible.some(a => !a.market?.listedFeatures) && <p className="studio-note">{listing.connection?.reason || "Connecting to feature summaries…"} <button className="studio-text-button" onClick={() => void listing.check()}>Retry summary connection</button></p>}
-        <ReferenceApps apps={shown} selections={draft.selected} custom={custom} disabled={busy} select={select} selectAll={selectAll} customize={(appId, f) => update({ selected: { ...draft.selected, [appId]: [...new Set([...(draft.selected[appId] || []), f.id])] }, customFeatures: [...custom.filter(x => x.id !== f.id), f] })} matches={a => featureMatches(a, plan)} />
+        <ReferenceApps baseAppId={draft.baseAppId} chooseBase={baseAppId => update({ baseAppId })} apps={shown} selections={draft.selected} custom={custom} disabled={busy} select={select} selectAll={selectAll} customize={(appId, f) => update({ selected: { ...draft.selected, [appId]: [...new Set([...(draft.selected[appId] || []), f.id])] }, customFeatures: [...custom.filter(x => x.id !== f.id), f] })} matches={a => featureMatches(a, plan)} summaryStatus={summaryStatus} />
       </section>
-      <aside className="studio-card studio-mix-panel" aria-label="Feature mixer"><FeatureMix apps={all} selections={draft.selected} custom={custom} disabled={busy} remove={select} removeCustom={id => update({ customFeatures: custom.filter(f => f.id !== id) })} />
+      <aside className="studio-card studio-mix-panel" aria-label="Feature mixer">{baseApp && <div className="studio-base-summary"><p className="studio-eyebrow">YOUR BASE APP</p><strong>{baseApp.name}</strong><p>Keep its core purpose and add your selected improvements.</p><button className="studio-text-button" disabled={busy} onClick={() => update({ baseAppId: undefined })}>Clear base app</button></div>}<FeatureMix apps={all} selections={draft.selected} custom={custom} disabled={busy} remove={select} removeCustom={id => update({ customFeatures: custom.filter(f => f.id !== id) })} />
         <label className="studio-input-label" htmlFor="studio-custom-feature">Your own feature idea</label><div className="studio-inline"><input id="studio-custom-feature" maxLength={120} value={feature} onChange={e => setFeature(e.target.value)} placeholder="Describe a feature you’d like to add" /><button className="studio-button secondary" disabled={busy || !feature.trim() || custom.length >= 20} onClick={() => { update({ customFeatures: [...custom, { id: `custom-${crypto.randomUUID()}`, name: feature.trim(), description: feature.trim() }] }); setFeature(""); }}>Add</button></div>
         <details className="studio-details"><summary>A few preferences, if you have them</summary><div className="studio-form-grid"><label>App name<input maxLength={60} value={draft.name} onChange={e => update({ name: e.target.value })} placeholder="We can start with your domain" /></label><label>Who is it for?<input maxLength={600} value={draft.audience} onChange={e => update({ audience: e.target.value })} /></label><label>Starting style<select value={draft.style} onChange={e => update({ style: e.target.value as Draft['style'] })}><option value="warm">Warm and welcoming</option><option value="sage">Calm and natural</option><option value="ink">Simple and focused</option></select></label></div></details>
-        <p className="studio-note">Choose one to five apps. Only your selected and custom features go into the design.</p>
+        <p className="studio-note">Choose one to five apps. You can choose a base app to keep its core purpose. Selected and custom features add to it.</p>
         <button className="studio-button primary" disabled={busy || !selectedCount} onClick={() => void submit()}>Confirm features and generate design <Icon name="Sparkles" size={17} /></button>
       </aside>
       </div>

@@ -35,8 +35,10 @@ export function designApi(options: DesignApiOptions): Plugin {
   const ready = () => runtime.recovery ||= Promise.all([changes.recover(), pipeline.recover()]).then(() => undefined);
   const modelAvailable = () => {
     if (available !== undefined) return available;
-    const result = spawnSync("codex", ["login", "status"], { timeout: 5000, encoding: "utf8" });
-    available = result.status === 0; return available;
+    const result = spawnSync("claude", ["auth", "status"], { timeout: 5000, encoding: "utf8" });
+    if (result.status !== 0) { available = false; return available; }
+    try { available = JSON.parse(result.stdout).loggedIn === true; } catch { available = true; }
+    return available;
   };
   const send = (response: ServerResponse, status: number, data: unknown) => {
     if (response.destroyed || response.headersSent) return;
@@ -81,7 +83,7 @@ export function designApi(options: DesignApiOptions): Plugin {
       }
       if (request.method === "GET" && parts.join("/") === "status") {
         const exampleId = options.exampleId && await exists(path.join(service.store.directory(options.exampleId), "manifest.json")) ? options.exampleId : null;
-        return send(response, 200, { available: modelAvailable(), provider: "Codex CLI", model: "gpt-6.1-sol", exampleId, referenceFilesConfigured: Boolean(options.pipeline.apkDir) });
+        return send(response, 200, { available: modelAvailable(), provider: "Claude Code CLI", model: process.env.MELD_CLAUDE_MODEL || "claude-sonnet-5", exampleId, referenceFilesConfigured: Boolean(options.pipeline.apkDir) });
       }
       if (request.method === "POST" && parts.join("/") === "pipeline") {
         if (!modelAvailable()) throw new WorkbenchError("model_unavailable", "The design model is not connected. Your market choices are saved.", 503);

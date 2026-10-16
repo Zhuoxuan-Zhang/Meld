@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { write, fileSha } from "../../pipeline/dist/src/integration.js";
+import { write, fileSha, json } from "../../pipeline/dist/src/integration.js";
 import { mkdir } from "node:fs/promises";
 import { HighLevelDocument } from "../../backend/src/high-level";
 import { z } from "../../pipeline/dist/src/integration.js";
@@ -151,5 +151,46 @@ test("unavailable background APKs do not block feature choices, editing or detai
     expect(project.referencePreparation?.progress?.apps.every(app => app.download.status === "failed" && app.analysis === "skipped")).toBe(true);
     const approved = await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision });
     expect((await wait(api, approved)).status).toBe("succeeded"); expect(api.counts().analysisCalls).toBe(1);
+  } finally { await api.close(); }
+});
+
+test("a base app is validated, survives outline edits, and reaches detailed design and build inputs", async () => {
+  let seenBase: string | undefined;
+  const api = await projectServer({ apks: false, listedFeatures: true, highLevel: async project => { seenBase = project.featurePreferences.baseAppId; return { document: structuredClone(document), response: "Ready." }; } });
+  try {
+    let project = await createOutline(api);
+    const apps = Object.values(project.references).flatMap(scan => scan.apps).filter(app => !app.retained).sort((a, b) => b.score - a.score || a.rank - b.rank || a.appId.localeCompare(b.appId)).slice(0, 5);
+    const base = apps[2];
+    const invalid = await fetch(api.address + `/api/projects/${project.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: project.version, featurePreferences: { ...project.featurePreferences, baseAppId: "missing.app" } }) });
+    expect(invalid.status).toBe(422); expect((await api.service.get(project.id)).version).toBe(project.version);
+    project = await call<Project>(api, `/api/projects/${project.id}`, { expectedVersion: project.version, featurePreferences: { selections: {}, customRequests: [{ id: "custom-hint", name: "Gentle hints", description: "Offer a hint within the main activity." }], baseAppId: base.appId } }, "PATCH");
+    expect(project.highLevelDesign).toBeUndefined();
+    await wait(api, await call<Job>(api, `/api/projects/${project.id}/design`, action(project))); project = await api.service.get(project.id);
+    expect(seenBase).toBe(base.appId);
+    const changed = { ...project.highLevelDesign!.document, appearance: "Blue accents." };
+    project = await call<Project>(api, `/api/projects/${project.id}/high-level`, { expectedVersion: project.version, baseRevision: project.highLevelDesign!.revision, document: changed }, "PATCH");
+    expect(project.featurePreferences.baseAppId).toBe(base.appId);
+    const runner = api.service.pipeline.options.runner!;
+    let capturedBrief: any;
+    api.service.pipeline.options.runner = async task => {
+      capturedBrief = await json(task.brief);
+      const result = await runner(task);
+      // The synthetic runner supplies its own notes fixture. Carry the real
+      // handoff metadata through, as the production CLI does when saving brief.json.
+      const fixtureBrief = await json(path.join(task.run, "brief.json"));
+      await write(path.join(task.run, "brief.json"), { ...fixtureBrief, market_signals: capturedBrief.market_signals });
+      return result;
+    };
+    const job = await call<Job>(api, `/api/projects/${project.id}/approve-outline`, { ...action(project), revision: project.highLevelDesign!.revision });
+    expect((await wait(api, job)).status).toBe("succeeded");
+    await expect.poll(async () => (await api.service.get(project.id)).latestBuild?.status).toBe("succeeded");
+    const pipeline = await api.service.pipeline.get((await api.service.storedJob(job.id)).pipelineJobId!);
+    expect(pipeline.input.base_app_id).toBe(base.appId);
+    const input = await api.service.buildInput(project.id);
+    expect((input.brief.market_signals as any).foundation).toMatchObject({ app_id: base.appId, title: base.title });
+    expect(capturedBrief.core_tasks).not.toEqual(["create", "edit", "save", "find", "reopen"]);
+    project = await api.service.get(project.id);
+    project = await call<Project>(api, `/api/projects/${project.id}`, { expectedVersion: project.version, brief: { ...project.brief, input: "A different app idea" } }, "PATCH");
+    expect(project.featurePreferences.baseAppId).toBeUndefined(); expect(project.needsResearch).toBe(true);
   } finally { await api.close(); }
 });

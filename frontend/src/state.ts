@@ -20,6 +20,7 @@ export type Draft = {
   designProposalId?: string;
   domains: string[];
   selected: Record<string, string[]>;
+  baseAppId?: string;
   name: string;
   audience: string;
   description: string;
@@ -61,16 +62,16 @@ export function startDiscovery(d: Draft, source: "idea" | "domains"): Draft {
       audience: d.audience === plan.audience ? "" : d.audience,
     } : {};
   return { ...d, ...brief, domains, discoverySource: source, discoveryStarted: true,
-    ...(changed ? { market: {}, selected: {}, customFeatures: [] } : {}),
+    ...(changed ? { market: {}, selected: {}, baseAppId: undefined, customFeatures: [] } : {}),
   };
 }
-export function catalog(d: Pick<Draft, "domains" | "market" | "selected" | "complexity">) {
+export function catalog(d: Pick<Draft, "domains" | "market" | "selected" | "complexity" | "baseAppId">) {
   return buildCatalog(d.domains, d.market).filter((app) => {
     const fit = referenceFit(app);
-    return fitsFilter(fit, d.complexity) || (fit.level !== "complex" && !!d.selected[app.id]?.length);
+    return fitsFilter(fit, d.complexity) || (fit.level !== "complex" && (!!d.selected[app.id]?.length || d.baseAppId === app.id));
   });
 }
-export function catalogById(d: Pick<Draft, "domains" | "market" | "selected" | "complexity">) {
+export function catalogById(d: Pick<Draft, "domains" | "market" | "selected" | "complexity" | "baseAppId">) {
   return Object.fromEntries(catalog(d).map((a) => [a.id, a]));
 }
 export function loadDraft(): Draft {
@@ -116,6 +117,7 @@ export function loadDraft(): Draft {
     // Resume older discovery drafts in the current studio, never in demo pages.
     if (!Object.hasOwn(raw, "discoveryStarted")) d.discoveryStarted = Boolean(d.intent?.approved || d.market);
 
+    if (typeof raw.baseAppId === "string" && buildCatalog(d.domains, d.market).some(a => a.id === raw.baseAppId && !a.market?.retained && referenceFit(a).level !== "complex")) d.baseAppId = raw.baseAppId;
     const rawSelected =
       raw.selected && typeof raw.selected === "object" ? raw.selected : {};
     d.selected = Object.fromEntries(
@@ -175,7 +177,7 @@ export function withMarketResult(
   const kept = (d.market?.[domain]?.apps || [])
     .filter(
       (a) =>
-        d.selected[a.appId]?.length &&
+        (d.selected[a.appId]?.length || d.baseAppId === a.appId) &&
         !result.apps.some((b) => b.appId === a.appId),
     )
     .map((a) => ({ ...a, retained: true }));
@@ -219,5 +221,5 @@ export function withListedFeatures(
   return next;
 }
 export function selectedApps(d: Draft) {
-  return catalog(d).filter((a) => a.features.some(f => d.selected[a.id]?.includes(f.id)));
+  return catalog(d).filter((a) => a.id === d.baseAppId || a.features.some(f => d.selected[a.id]?.includes(f.id)));
 }

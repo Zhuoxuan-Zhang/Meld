@@ -23,7 +23,7 @@ const project = await service.create({ requestKey: "puzzle-harbor-20261014", exa
 const url = `${base}/?project=${project.id}`;
 await writeFile(path.join(directory, "project.json"), JSON.stringify({ projectId: project.id, url, sourceRun: run, sourceDesignId: sourceId }, null, 2));
 console.log(`Project ${project.id}: ${url}`);
-const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE || "/home/zhuoxuan/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome" });
+const browser = await chromium.launch({ executablePath: process.env.MELD_BROWSER_EXECUTABLE });
 const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } }); page.on("pageerror", error => errors.push(error.message));

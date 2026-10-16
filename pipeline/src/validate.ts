@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { paletteErrors } from './palette.js';
 import { DesignPatch, applyDesignPatch } from './design-patch.js';
+import { DesignReferenceRepair, applyDesignReferenceRepair } from './design-repair.js';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { AppSpec, Comparison, Decisions, Evidence, UnifiedDesign, Review } from './schemas.js';
@@ -178,8 +179,9 @@ export async function validateRun(run: string) {
   const review = await load('synthesis/design-review.json');
   if (!Review.safeParse(review).success || !review.passed || review.issues.some((i: any) => i.severity === 'blocking')) errors.push('Unresolved design review');
   if (!design || design.status !== 'final') errors.push('Design missing or remains draft');
-  for (const label of ['compare', 'decide', 'design']) if (!(label === 'decide' && state.human_decisions && d?.chosen_by === 'user' && state.stages?.decide) && !state.calls?.some((c: any) => c.success && (c.stage === label || label === 'design' && c.stage.startsWith('design-repair-'))) && !(label==='design'&&state.config.provider==='codex_cli'&&['design-core-','design-pages-','design-contracts-'].every(prefix=>state.calls?.some((c:any)=>c.success&&c.stage.startsWith(prefix))))) errors.push(`Successful live stage missing ${label}`);
-  if(state.config.provider==='codex_cli'&&state.calls?.some((c:any)=>c.stage.startsWith('design-core-'))&&design){
+  const cliProvider = ['codex_cli', 'claude_cli'].includes(state.config.provider);
+  for (const label of ['compare', 'decide', 'design']) if (!(label === 'decide' && state.human_decisions && d?.chosen_by === 'user' && state.stages?.decide) && !state.calls?.some((c: any) => c.success && (c.stage === label || label === 'design' && c.stage.startsWith('design-repair-'))) && !(label==='design'&&cliProvider&&['design-core-','design-pages-','design-contracts-'].every(prefix=>state.calls?.some((c:any)=>c.success&&c.stage.startsWith(prefix))))) errors.push(`Successful live stage missing ${label}`);
+  if(cliProvider&&state.calls?.some((c:any)=>c.stage.startsWith('design-core-'))&&design){
     const assembly=await load('synthesis/design-assembly.json');
     if(assembly?.final_design_sha256!==sha(JSON.stringify(design))||assembly.fragment_calls?.length!==3||!assembly.fields_generated_by_model||assembly.templates_used!==false) errors.push('Unverified fragmented design assembly');
     else {
@@ -193,8 +195,12 @@ export async function validateRun(run: string) {
       for (const part of assembly.parsed_patch_sha256 || []) {
         try {
           if (part.sha256 !== await fileSha(path.join(run, 'calls', part.id, 'parsed.json'))) errors.push(`Design repair changed ${part.id}`);
-          if (!state.calls.some((c: any) => c.id === part.id && c.success && c.stage.startsWith('design-corrections-'))) errors.push(`Unverified design repair call ${part.id}`);
-          joined = applyDesignPatch(joined, DesignPatch.parse(await json(path.join(run, 'calls', part.id, 'parsed.json'))));
+          const call = state.calls.find((c: any) => c.id === part.id && c.success && /^(design-corrections-|design-reference-repair-)/.test(c.stage));
+          if (!call) errors.push(`Unverified design repair call ${part.id}`);
+          const patch = await json(path.join(run, 'calls', part.id, 'parsed.json'));
+          joined = call?.stage.startsWith('design-reference-repair-')
+            ? applyDesignReferenceRepair(joined, DesignReferenceRepair.parse(patch), (await load('brief.json')).core_tasks, d.selections.map((s: any) => s.option_id))
+            : applyDesignPatch(joined, DesignPatch.parse(patch));
         } catch (error) { errors.push(`Invalid design repair ${part.id}: ${String(error)}`); }
       }
       if(!isDeepStrictEqual(joined,design)) errors.push('Final design does not match actual model-generated fragments');
@@ -229,6 +235,13 @@ export async function validateRun(run: string) {
       const events=(await fs.readFile(path.join(dir,'events.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
       if (response.execution.code!==0 || !response.turn_completed || response.tool_activity || response.errors.length || !events.some(e=>e.type==='turn.completed') || command.args[command.args.indexOf('--model')+1]!==state.config.model || !isDeepStrictEqual(JSON.parse(response.final_text),parsed)) errors.push(`Unverified Codex CLI result ${call.id}`);
     } catch { errors.push(`Codex CLI execution proof unavailable ${call.id}`); }
+  }
+  if (state.config.provider === 'claude_cli') for (const call of state.calls || []) if (call.success) {
+    try {
+      const dir=inside(run,path.join(run,'calls',call.id));
+      const response=await json(path.join(dir,'response.json')),parsed=await json(path.join(dir,'parsed.json')),command=await json(path.join(dir,'command.json'));
+      if (response.execution.code!==0 || !response.turn_completed || response.tool_activity || response.errors.length || command.args[command.args.indexOf('--model')+1]!==state.config.model || !isDeepStrictEqual(JSON.parse(response.final_text),parsed)) errors.push(`Unverified Claude Code CLI result ${call.id}`);
+    } catch { errors.push(`Claude Code CLI execution proof unavailable ${call.id}`); }
   }
   const result = { passed: errors.length === 0, status: errors.length ? 'INCOMPLETE' : 'LIVE_E2E_PASSED', errors, checked_at: new Date().toISOString(), hard_conflicts: Comparison.safeParse(c).success ? c.conflicts.filter((x: any) => x.kind === 'hard_conflict').length : null };
   await write(path.join(run, 'validation/validation-report.json'), result);

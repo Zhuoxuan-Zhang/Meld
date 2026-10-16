@@ -25,3 +25,19 @@ export function applyDesignTextRepair<T>(design: T, repair: z.infer<typeof Desig
   }
   return result;
 }
+
+export const DesignReferenceRepair = z.object({
+  core_tasks: z.object({ before: z.array(z.string()), after: z.array(z.string()) }).strict(),
+  decisions: z.object({ before: z.array(z.string()), after: z.array(z.string()) }).strict(),
+  reason: z.string().min(1),
+}).strict();
+
+// Reconcile only reference lists, never behavior, evidence, or the authoritative
+// choices. A fresh whole-design review still checks actual task coverage.
+export function applyDesignReferenceRepair<T extends { scope: { core_tasks: string[] }; decisions: string[] }>(design: T, repair: z.infer<typeof DesignReferenceRepair>, tasks: string[], options: string[]): T {
+  const equal = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+  if (!equal(repair.core_tasks.before, design.scope.core_tasks) || !equal(repair.decisions.before, design.decisions)) throw new Error('Reference repair does not match the saved draft');
+  if (!equal(repair.core_tasks.after, tasks) || !equal(repair.decisions.after, options)) throw new Error('Reference repair must match the approved tasks and selected option IDs exactly');
+  const result = structuredClone(design);
+  result.scope.core_tasks = [...repair.core_tasks.after]; result.decisions = [...repair.decisions.after]; return result;
+}

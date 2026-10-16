@@ -1,9 +1,9 @@
 {
-  "provider": "codex_cli",
-  "model": "gpt-5.6-sol",
+  "provider": "claude_cli",
+  "model": "claude-sonnet-5",
   "reasoning_effort": "low",
   "max_calls": 80,
   "max_output_tokens": 16000,
   "model_timeout_ms": 300000,
-  "pricing": { "source": "ChatGPT-authenticated Codex CLI; subscription usage is not API dollar pricing" }
+  "pricing": { "source": "Claude Code CLI subscription; subscription usage is not API dollar pricing" }
 }

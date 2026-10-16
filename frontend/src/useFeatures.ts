@@ -9,7 +9,7 @@ export type FeatureConnection = {
   model?: string;
 };
 export type FeatureState =
-  | { phase: "running"; appIds: string[]; generatedAt: string; queued?: boolean }
+  | { phase: "running"; appIds: string[]; generatedAt: string; startedAt: number; queued?: boolean }
   | { phase: "error"; appIds: string[]; generatedAt: string; message: string };
 const MAX_ACTIVE = 2;
 
@@ -111,7 +111,7 @@ export function useListedFeatures(
         appIds: apps.map((a) => a.appId),
         generatedAt: result.generatedAt,
       };
-      settle(domain, { phase: "running", ...base, queued: true });
+      settle(domain, { phase: "running", ...base, startedAt: Date.now(), queued: true });
       const timeout = setTimeout(() => controller.abort("timeout"), 420_000);
       let failure = "";
       let acquired = false;
@@ -120,7 +120,7 @@ export function useListedFeatures(
         acquired = true;
         controller.signal.throwIfAborted();
         if (requests.current.get(domain) === controller)
-          settle(domain, { phase: "running", ...base });
+          settle(domain, { phase: "running", ...base, startedAt: Date.now() });
         const res = await fetch("/api/claude/features", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

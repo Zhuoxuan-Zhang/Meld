@@ -1,6 +1,10 @@
 import { z, write, exists, json, WorkbenchError } from "../../pipeline/dist/src/integration.js";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
+// executeClaudeCli's saved response.json uses the same envelope shape as Codex's
+// (execution.code, turn_completed, errors, tool_activity, final_text, usage),
+// so this recovery parser works unchanged on artifacts from either provider.
 import { parseCodex } from "../../pipeline/dist/src/codex.js";
 import { fileSha } from "../../pipeline/dist/src/integration.js";
 import { buildModelJson as modelJson } from "./model";
@@ -44,9 +48,28 @@ export async function generateSources(directory: string, round: number, instruct
       if (index < completed.length) continue;
       await progress(`Applying app corrections ${index + 1} of ${plan.files.length}…`);
       const existing = merged.get(file.path), context = { ...data, issues, plan, requestedFile: file, currentFiles: [...merged.values()] };
-      const generated = existing
-        ? applySourceEdits(existing, await ask(directory, `repair-file-${round}-${index}`, instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.", context, SourceEdits, 12000, "medium", 600000))
-        : await ask(directory, `repair-file-${round}-${index}`, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete. Do not emit Markdown fences.", context, SourceFile, 12000, "medium", 900000);
+      const askRepair = async <T>(schema: z.ZodType<T>, prompt: string, effort: string): Promise<T> => {
+        try { return await ask(directory, `repair-file-${round}-${index}`, prompt, context, schema, 12000, effort, 360000); }
+        catch (error) {
+          if ((error as WorkbenchError).code !== "model_output") throw error;
+          await progress(`Retrying app corrections ${index + 1} of ${plan.files.length}…`);
+          return ask(directory, `repair-file-${round}-${index}-retry`, prompt + " The previous response did not complete or validate. Keep the response compact, preserve required behavior and shared signatures, and omit commentary and repeated declarations.", context, schema, 12000, "low", 360000);
+        }
+      };
+      let generated: z.infer<typeof SourceFile>;
+      if (existing) {
+        const editInstructions = instructions + " Repair only the requested existing Kotlin file using minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.";
+        const patch = await askRepair(SourceEdits, editInstructions, "medium");
+        try { generated = applySourceEdits(existing, patch); }
+        catch (error) {
+          if ((error as WorkbenchError).code !== "invalid_code" || patch.path !== existing.path) throw error;
+          await progress(`Refining app corrections ${index + 1} of ${plan.files.length}…`);
+          const corrected = await ask(directory, `repair-file-${round}-${index}-edit-retry`, editInstructions + " The prior patch did not match the exact current file. Recreate the smallest valid patch using the supplied unchanged current file and validation error. Use exact unique anchors; do not assume any rejected edit was applied.", { ...context, rejectedPatch: patch, validationError: String(error) }, SourceEdits, 12000, "low", 360000);
+          generated = applySourceEdits(existing, corrected);
+        }
+      } else {
+        generated = await askRepair(SourceFile, instructions + " Generate only the requested new Kotlin file according to the complete repair plan. Return its full contents. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete, aiming for 800–1800 output tokens without repeated boilerplate. Do not emit Markdown fences.", "low");
+      }
       if (generated.path !== file.path) throw new WorkbenchError("invalid_code", "The repaired file does not match its planned module.", 422);
       checkSourcePaths([generated]); merged.set(generated.path, generated); completed.push(generated);
       await write(checkpoint, { plan, files: completed });
@@ -57,7 +80,7 @@ export async function generateSources(directory: string, round: number, instruct
   }
   const checkpoint = path.join(directory, "generation-checkpoint.json");
   const resumed = await exists(checkpoint) ? z.object({ plan: Plan, files: z.array(SourceFile).max(16) }).strict().parse(await json(checkpoint)) : null;
-  const plan = resumed?.plan || await ask(directory, "source-plan", instructions + " Plan a small implementation using only as many focused Kotlin files as the approved scope needs, typically 4–10. Return the ordered file manifest and exact shared type/function signatures. Put common pure types first, domain logic next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. MainActivity.kt must be present. Aim for 1000–3000 output tokens per file; split large UI implementations into separate screens. Include every approved task and feature. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration.", data, Plan, 6000, "medium");
+  const plan = resumed?.plan || await ask(directory, "source-plan", instructions + " Plan a small implementation using only as many focused Kotlin files as the approved scope needs, typically 4–16. Keep each file small enough to generate reliably: aim for 800–1800 output tokens and roughly 80–160 lines. Split a large coordinator into focused helpers and UI into small tool panels rather than putting every event and operation into one reducer. Return the ordered file manifest and exact shared type/function signatures. Put common pure types first, domain logic next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. MainActivity.kt must be present. Split large UI implementations into separate feature screens or panels. Include every approved feature and the base app’s primary workflow. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration.", data, Plan, 6000, "medium");
   checkSourcePaths(plan.files.map(file => ({ path: file.path, content: "planned" })));
   if (!plan.files.some(file => file.path === "app/src/main/java/generated/MainActivity.kt") || !plan.files.some(file => file.path.startsWith("app/src/test/"))) throw new WorkbenchError("invalid_code", "The source plan must include a launcher and tests.", 422);
   const files: Sources["files"] = resumed?.files || [];
@@ -66,7 +89,18 @@ export async function generateSources(directory: string, round: number, instruct
   for (const [index, file] of plan.files.entries()) {
     if (index < files.length) continue;
     await progress(`Implementing app module ${index + 1} of ${plan.files.length}…`);
-    const generated = await ask(directory, `file-${index}`, instructions + " Generate only the requested Kotlin file. Follow the exact agreed interfaces and already generated declarations; do not redefine types belonging to other files. Implement complete logic for this module with no TODO placeholders. Pure tests must exercise the specified domain rules and recovery, not merely assert constants. Keep this file concise. Do not emit Markdown fences.", { ...data, plan, requestedFile: file, generatedFiles: files }, SourceFile, 12000, "medium", 900000);
+    const moduleInstructions = instructions + " Generate only the requested Kotlin file. Follow the exact agreed interfaces and already generated declarations; do not redefine types belonging to other files. Implement complete logic for this module with no TODO placeholders. Pure tests must exercise the app’s domain rules and recovery as applicable, not merely assert constants. Keep this file concise, aiming for 800–1800 output tokens. Do not emit Markdown fences.";
+    const context = { ...data, plan, requestedFile: file, generatedFiles: files };
+    let generated: z.infer<typeof SourceFile>;
+    try {
+      generated = await ask(directory, `file-${index}`, moduleInstructions, context, SourceFile, 12000, "medium", 360000);
+    } catch (error) {
+      if ((error as WorkbenchError).code !== "model_output") throw error;
+      // Keep the failed raw response. Retry only this unsaved module, leaving
+      // the ordered checkpoint and completed modules untouched.
+      await progress(`Retrying app module ${index + 1} of ${plan.files.length} with a smaller response…`);
+      generated = await ask(directory, `file-${index}-retry`, moduleInstructions + " The previous response did not complete or validate. Return a compact implementation with minimal commentary and no duplicated helpers. Preserve every required behavior and exact shared signature; use existing modules rather than restating them.", context, SourceFile, 12000, "low", 360000);
+    }
     if (generated.path !== file.path) throw new WorkbenchError("invalid_code", "The generated file does not match its planned module.", 422);
     checkSourcePaths([generated]); files.push(generated);
     await write(path.join(directory, "generation-checkpoint.json"), { plan, files });
@@ -99,7 +133,7 @@ export async function recoverCompletedBatch(modelDirectory: string, prior: Sourc
 
 // Reconstruct an interrupted repair from its actual recorded model plan and
 // completed responses. The caller also verifies the approved design/profile.
-export async function recoverRepairPrefix(modelDirectory: string) {
+export async function recoverRepairPrefix(modelDirectory: string, expectedIntegration?: unknown) {
   const names = (await fs.readdir(modelDirectory)).filter(name => /^repair-plan-\d+-\d+$/.test(name)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)));
   for (const name of names) {
     const planFile = path.join(modelDirectory, name, "response.json"), prompt = path.join(modelDirectory, name, "prompt.txt");
@@ -108,11 +142,12 @@ export async function recoverRepairPrefix(modelDirectory: string) {
       const plan = PatchPlan.parse(parseCodex(await json(planFile), PatchPlan, 6000));
       checkSourcePaths(plan.files.map(file => ({ path: file.path, content: "planned" })));
       const data = JSON.parse((await fs.readFile(prompt, "utf8")).trim().split("\n").at(-1)!);
+      if (expectedIntegration !== undefined && !isDeepStrictEqual(data.integration, expectedIntegration)) continue;
       const prior = SourceFiles.parse(data.prior); checkSourcePaths(prior.files);
       const issues = z.array(z.string()).parse(data.issues), round = name.split("-")[2];
       const all = await fs.readdir(modelDirectory), files: Sources["files"] = [], calls: { path: string; sha256: string }[] = [];
       for (const [index, file] of plan.files.entries()) {
-        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
+        const candidate = all.filter(dir => new RegExp(`^repair-file-${round}-${index}(?:-(?:retry|edit-retry))?-\\d+$`).test(dir)).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)))[0];
         if (!candidate) break;
         const responseFile = path.join(modelDirectory, candidate, "response.json"); if (!(await exists(responseFile))) break;
         let parsed: z.infer<typeof SourceFile>;

@@ -26,6 +26,10 @@ test("selection JSON preserves exact feature text without labeling other ranked 
     expect(selection.selected_features).toEqual([{ ...chosen, reference_package_ids: ["com.example.notes"] }]);
     expect(selection.selected_reference_apps.map((app: { package_id: string }) => app.package_id)).toEqual(["com.example.notes"]);
     expect(selection.analysis_reference_apps).toHaveLength(5);
+    expect(selection.selected_base_app).toBeNull();
+    const withBase = JSON.parse(await renderSelectionScope({ ...body, base_app_id: apps[2].appId }, apps, file));
+    expect(withBase.selected_base_app).toEqual({ package_id: apps[2].appId, title: apps[2].title });
+    expect(withBase.selected_features).toEqual(selection.selected_features);
     await write(file, "Updated guidance\n{{selection_json}}");
     expect(await renderSelectionScope(body, apps, file)).toMatch(/^Updated guidance\n/);
     await write(file, "Missing placeholder");

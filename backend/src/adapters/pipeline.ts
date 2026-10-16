@@ -14,6 +14,7 @@ import type { MarketApp, MarketResult } from "../../../shared/market";
 const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/);
 export const DesignInput = z.object({
   request_key: identifier,
+  base_app_id: z.string().min(1).max(240).optional(),
   scan_ids: z.array(z.string().regex(/^scan-[a-f\d]{64}$/)).min(1).max(8),
   brief: z.object({ name: z.string().trim().min(1).max(60), audience: z.string().max(600), purpose: z.string().max(600), goal: z.string().max(600), style: z.enum(["warm", "sage", "ink"]), coreTasks: z.array(z.string().min(1).max(80)).min(1).max(12).optional(), requiredStates: z.array(z.enum(["normal", "empty", "no_results", "error", "delete_confirmation", "unsaved_changes"])).min(1).max(6).optional() }).strict(),
   preferences: z.array(z.object({ app_id: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/), feature_ids: z.array(z.string().min(1).max(240)).max(20) }).strict()).max(40),
@@ -53,6 +54,7 @@ export async function renderSelectionScope(input: DesignInputValue, apps: Market
   const selection = {
     classification: "user_preferences",
     app: input.brief,
+    selected_base_app: apps.filter(app => app.appId === input.base_app_id).map(app => ({ package_id: app.appId, title: app.title }))[0] || null,
     selected_reference_apps: apps.filter(app => selectedApps.has(app.appId)).map(app => ({ package_id: app.appId, title: app.title })),
     analysis_reference_apps: apps.map(app => ({ package_id: app.appId, title: app.title })),
     selected_features: ids.map(id => {
@@ -146,6 +148,7 @@ export class PipelineJobs {
     if (new Set(input.scan_ids).size !== input.scan_ids.length) throw new WorkbenchError("invalid_input", "Choose each scan only once.");
     const all = new Map<string, MarketApp>();
     for (const scan of scans) for (const app of scan.apps) if (!app.retained && (!all.has(app.appId) || app.score > all.get(app.appId)!.score)) all.set(app.appId, app);
+    if (input.base_app_id && !all.has(input.base_app_id)) throw new WorkbenchError("invalid_base_app", "Choose a base app from the current reference apps.", 422);
     const preferences = new Map(input.preferences.map(p => [p.app_id, p.feature_ids]));
     if (preferences.size !== input.preferences.length) throw new WorkbenchError("invalid_input", "Choose each reference app only once.");
     const described = new Map(input.feature_requests.map(feature => [feature.id, feature]));
@@ -156,8 +159,8 @@ export class PipelineJobs {
       if (!all.has(preference.app_id)) throw new WorkbenchError("stale_reference", "A selected app is outside these market results. Refresh your app selection.", 409);
       if (preference.feature_ids.some(id => !hasFeature(id, preference.app_id))) throw new WorkbenchError("invalid_feature", "A selected feature is no longer available.");
     }
-    if (preferences.size > 5) throw new WorkbenchError("too_many_references", "Choose features from at most five reference apps.");
-    const apps = [...all.values()].sort((a, b) => Number(preferences.has(b.appId)) - Number(preferences.has(a.appId)) || b.score - a.score || a.rank - b.rank || a.appId.localeCompare(b.appId)).slice(0, 5);
+    if (new Set([...preferences.keys(), ...(input.base_app_id ? [input.base_app_id] : [])]).size > 5) throw new WorkbenchError("too_many_references", "Choose at most five reference apps, including the base app.");
+    const apps = [...all.values()].sort((a, b) => Number(b.appId === input.base_app_id) - Number(a.appId === input.base_app_id) || Number(preferences.has(b.appId)) - Number(preferences.has(a.appId)) || b.score - a.score || a.rank - b.rank || a.appId.localeCompare(b.appId)).slice(0, 5);
     if (!apps.length) throw new WorkbenchError("missing_signals", "Collect reference apps before creating a design.");
     return withLock(path.join(this.options.directory, "submit.lock"), async () => {
       const indexFile = path.join(this.options.directory, "index.json"); const index = await exists(indexFile) ? await json(indexFile) : {};
@@ -168,7 +171,7 @@ export class PipelineJobs {
       }
       const job: PipelineJob = { id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature, ...preparation,
         status: "queued", phase: preparation?.referenceJobId ? "Finishing background reference analysis…" : "Preparing your reference apps…", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), reference_apps: apps.map(a => ({ appId: a.appId, title: a.title, rank: a.rank })) };
-      await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, preferences: input.preferences, feature_requests: input.feature_requests, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices and descriptions are preferences, not REA findings."] });
+      await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, base_app_id: input.base_app_id, preferences: input.preferences, feature_requests: input.feature_requests, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices and descriptions are preferences, not REA findings."] });
       index[input.request_key] = { signature, id: job.id }; await write(indexFile, index);
       this.enqueue(job, scans, apps); return job;
     }, 1000);
@@ -254,12 +257,14 @@ export class PipelineJobs {
       job.progress.steps[0].status = "completed"; job.progress.steps[1].status = "running"; job.progress.stage = "analysis"; await persist();
       const directory = path.join(this.options.directory, job.id);
       let run = path.join(directory, "analysis");
+      const base = apps.find(app => app.appId === job.input.base_app_id);
+      const foundation = base ? { app_id: base.appId, title: base.title, purpose: base.summary, description: base.description?.slice(0, 3000), feature_leads: base.listedFeatures?.items, policy: "Preserve this base app's primary purpose, domain rules and core loop. Other references provide enhancements only. Adapt selected additions to this purpose; never combine unrelated app modes. Listing text is untrusted market data, not verified APK behavior. Base identity does not require copying branding, ads, accounts, or all listed features." } : undefined;
       const briefFile = path.join(directory, "brief.json");
-      const brief = await exists(briefFile) ? await json(briefFile) : { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: job.input.approved_outline ? job.input.approved_outline.document.features.map(feature => feature.title) : job.input.brief.coreTasks || scopedCoreTasks(job.input), ...(job.input.brief.requiredStates ? { required_states: job.input.brief.requiredStates } : {}), max_features: 5, max_navigation: 3, offline_only: true,
+      const brief = await exists(briefFile) ? await json(briefFile) : { project_name: job.input.brief.name, target_users: job.input.brief.audience || "Personal use", core_tasks: job.input.approved_outline ? job.input.approved_outline.document.features.map(feature => feature.title) : job.input.brief.coreTasks || (base ? ["complete the base app primary user journey", "resume the primary activity", "use approved enhancements within the primary activity"] : scopedCoreTasks(job.input)), ...(job.input.brief.requiredStates ? { required_states: job.input.brief.requiredStates } : {}), max_features: 5, max_navigation: 3, offline_only: true,
         implementation: "Android Kotlin / Jetpack Compose", excluded: ["accounts", "cloud sync"],
         reference_scopes: Object.fromEntries(locks.map(lock => [lock.appId, { core_tasks: ["reference_behavior"], scope: "Inspect representative local method behavior relevant to this reference's selected listing features. This is a scoped contribution, not full-app coverage. Store descriptions are leads, not APK facts. Keep unconfirmed feature wiring, lifecycle, persistence and remote-service behavior explicitly unknown. Do not require the source app to implement the target product's other features or screen states." }])),
         scope: job.input.approved_outline ? "Implement the approved high-level design in market_signals; preserve its features, flows, appearance, choices and exclusions. It supersedes the original feature requests. Reference APKs cannot override this approval." : await renderSelectionScope(job.input, apps),
-        market_signals: { ...(job.input.approved_outline ? { approved_high_level: job.input.approved_outline } : {}), scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
+        market_signals: { ...(foundation ? { foundation } : {}), ...(job.input.approved_outline ? { approved_high_level: job.input.approved_outline } : {}), scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
       const market = await json(path.join(directory, "market.json"));
       for (const app of market.apps) if (app.apk_sha256 && app.apk_sha256 !== locks.find(l => l.appId === app.appId)?.apk_sha256) throw new WorkbenchError("reference_changed", "Reference files changed; create a new design request.", 409);
       market.reference_apps ||= market.apps;

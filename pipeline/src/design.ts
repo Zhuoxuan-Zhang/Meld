@@ -8,6 +8,7 @@ import { validateComparison, validateDecisions, validateDesign } from './validat
 import { renderDesign } from './render.js';
 import { stage } from './state.js';
 import { DesignPatch, applyDesignPatch } from './design-patch.js';
+import { DesignReferenceRepair, applyDesignReferenceRepair } from './design-repair.js';
 import { designErrors } from './workbench/validation.js';
 import { zodTextFormat } from 'openai/helpers/zod';
 const DesignCore=UnifiedDesign.omit({pages:true,visual:true,compose:true});
@@ -19,7 +20,7 @@ async function acceptFragments(run: string, state: any, design: any, review: any
   const dir = path.join(run, 'synthesis');
   await write(path.join(dir, 'design-review.json'), review);
   await write(path.join(run, 'final/final-design.json'), design); await renderDesign(path.join(run, 'final'), design);
-  await write(path.join(dir, 'design-assembly.json'), { provider: 'codex_cli', mode: 'model schema fragments and recorded targeted repairs, followed by whole-design auxiliary review', fragment_calls: fragmentCalls, patch_calls: patchCalls, parsed_patch_sha256: await Promise.all(patchCalls.map(async id => ({ id, sha256: await fileSha(path.join(run, 'calls', id, 'parsed.json')) }))), parsed_fragment_sha256: await Promise.all(fragmentCalls.map(async id => ({ id, sha256: await fileSha(path.join(run, 'calls', id, 'parsed.json')) }))), final_design_sha256: sha(JSON.stringify(design)), review_call: state.calls.at(-1).id, fields_generated_by_model: true, templates_used: false });
+  await write(path.join(dir, 'design-assembly.json'), { provider: state.config.provider, mode: 'model schema fragments and recorded targeted repairs, followed by whole-design auxiliary review', fragment_calls: fragmentCalls, patch_calls: patchCalls, parsed_patch_sha256: await Promise.all(patchCalls.map(async id => ({ id, sha256: await fileSha(path.join(run, 'calls', id, 'parsed.json')) }))), parsed_fragment_sha256: await Promise.all(fragmentCalls.map(async id => ({ id, sha256: await fileSha(path.join(run, 'calls', id, 'parsed.json')) }))), final_design_sha256: sha(JSON.stringify(design)), review_call: state.calls.at(-1).id, fields_generated_by_model: true, templates_used: false });
 }
 
 async function codexDesign(run:string,state:any,model:Claude,base:any,comparison:any,decisions:any){
@@ -45,8 +46,12 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
       joined = { ...joined, ...await json(path.join(run, 'calls', id, 'parsed.json')) };
     }
     for (const id of record.patch_calls || []) {
-      if (!state.calls.some((call: any) => call.id === id && call.success && call.stage.startsWith('design-corrections-'))) throw new Error('Draft repair call is not verified');
-      joined = applyDesignPatch(joined, DesignPatch.parse(await json(path.join(run, 'calls', id, 'parsed.json'))));
+      const call = state.calls.find((call: any) => call.id === id && call.success && /^(design-corrections-|design-reference-repair-)/.test(call.stage));
+      if (!call) throw new Error('Draft repair call is not verified');
+      const patch = await json(path.join(run, 'calls', id, 'parsed.json'));
+      joined = call.stage.startsWith('design-reference-repair-')
+        ? applyDesignReferenceRepair(joined, DesignReferenceRepair.parse(patch), base.brief.core_tasks, decisions.selections.map((s: any) => s.option_id))
+        : applyDesignPatch(joined, DesignPatch.parse(patch));
     }
     if (!isDeepStrictEqual(joined, saved)) throw new Error('Saved draft differs from its actual model fragments');
     const reviews = (await fs.readdir(dir)).filter(file => file.startsWith(`${kind}-review-${round}-`)).sort((a, b) => Number(b.match(/-(\d+)\.json$/)![1]) - Number(a.match(/-(\d+)\.json$/)![1]));
@@ -67,7 +72,16 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
   for(let round=startRound;round<startRound+3;round++){
     const before=state.calls.length;
     let design: any, fragmentCalls: string[], patchCalls: string[] = [], kind = 'fragment';
-    if (prior && priorFragmentCalls.length === 3) {
+    const referenceErrors = prior ? designErrors({ design: prior, brief: base.brief, decisions }, comparison, base.specs) : [];
+    if (prior && priorFragmentCalls.length === 3 && referenceErrors.length && referenceErrors.every(error => /^(Missing core task |Design omits decision |Unknown design decision )/.test(error))) {
+      const tasks = base.brief.core_tasks, options = decisions.selections.map((s: any) => s.option_id);
+      const patch = await model.ask(`design-reference-repair-${round}`, 'Repair only the two reference lists. Copy the exact saved lists into before and the supplied authoritative task names and chosen option IDs into after, in the supplied order. Do not change decisions, choose new options, alter behavior or invent evidence. These lists reconcile references; they do not prove behavior coverage.', { current: { core_tasks: prior.scope.core_tasks, decisions: prior.decisions }, authoritative: { core_tasks: tasks, decisions: options }, errors: referenceErrors }, DesignReferenceRepair, value => {
+        try { return designErrors({ design: UnifiedDesign.parse(applyDesignReferenceRepair(prior, value, tasks, options)), brief: base.brief, decisions }, comparison, base.specs); } catch (error) { return [String(error)]; }
+      });
+      design = UnifiedDesign.parse(applyDesignReferenceRepair(prior, patch, tasks, options));
+      kind = 'patched'; fragmentCalls = priorFragmentCalls;
+      patchCalls = [...priorPatchCalls, ...state.calls.slice(before).filter((c: any) => c.success && c.stage === `design-reference-repair-${round}`).map((c: any) => c.id)];
+    } else if (prior && priorFragmentCalls.length === 3) {
       const patch = await model.ask(`design-corrections-${round}`, prompt + '\nRepair only the supplied review findings with narrow replacements of existing JSON fields. path is relative to the design root, such as ["features","0","behavior"] or ["pages","1","back_behavior"]. For arrays of objects with id fields, use the item id instead of its numeric index, for example ["pages","page-editor","back_behavior"]. This avoids editing a neighboring item. Do not include the context key prior_design. For string fields use format=text and a plain value without JSON quoting. Use format=json only for objects, arrays, numbers, booleans or null; value must then be valid JSON. To append an array item, use - as the final path segment, for example ["pages","page-editor","states","-"]. To remove or reorder items, replace the containing array. Do not leave index gaps. Preserve all unrelated fields, IDs, copy, scope and accepted behavior exactly. Apply each correction consistently across relevant entities, flows, pages, states, contracts and acceptance cases. All replacement values must satisfy target_schema, including its enums and required fields. Every response must be a complete corrected patch against the unchanged supplied prior_design. Failed patches are atomic: none of their edits have been applied. On a retry, include every still-needed edit and append from the previous attempt, not just the fixes to its errors. Do not redesign the app or return the full design.', { ...base, comparison, decisions, prior_design: prior, review, target_schema: DesignTargetSchema }, DesignPatch, value => {
         try { return designErrors({ design: applyDesignPatch(prior, value), brief: base.brief, decisions }, comparison, base.specs); } catch (error) { return [String(error)]; }
       });
@@ -118,7 +132,7 @@ export async function synthesize(run: string, state: any, claude: Claude, brief:
   }, async () => validateDecisions(await json(path.join(dir, 'decisions.json')), comparison, specs));
   decisions = await json(path.join(dir, 'decisions.json'));
   await stage(run, state, 'design', ['final/final-design.json', 'final/design.md', 'final/wireframes.html', 'synthesis/design-review.json'], async () => {
-    if(claude.provider==='codex_cli'){await codexDesign(run,state,claude,base,comparison,decisions);return;}
+    if(claude.provider==='codex_cli' || claude.provider==='claude_cli'){await codexDesign(run,state,claude,base,comparison,decisions);return;}
     let design: any = await claude.ask('design', await claude.prompt('design'), { ...base, comparison, decisions }, UnifiedDesign, d => validateDesign(d, brief, decisions, specs));
     await write(path.join(dir, `design-draft-${Date.now()}.json`), design);
     let review: any;
