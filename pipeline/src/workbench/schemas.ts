@@ -41,6 +41,15 @@ export const ChangeRequest = z.object({
 export const ApplyRequest = z.object({ base_revision: Id, idempotency_key: Id, selected_change_ids: z.array(Id).min(1).max(8) }).strict();
 export const RestoreRequest = z.object({ base_revision: Id, target_revision: Id, idempotency_key: Id }).strict();
 export type UserDocumentT = z.infer<typeof UserDocument>;
+// Outline choices describe product scope. Only resolved developer conflicts
+// have decision references; constrain the generated cards to those real IDs.
+export function readableDocumentSchema(decisions: z.infer<typeof HumanDecisions>) {
+  const ids = decisions.selections.map(selection => selection.conflict_id);
+  const choice = UserDocument.shape.choices.element;
+  return UserDocument.extend({ choices: ids.length
+    ? z.array(choice.extend({ id: z.enum(ids) })).length(ids.length)
+    : z.array(choice).max(0) });
+}
 export type ChangePlanT = z.infer<typeof ChangePlan>;
 export type OperationT = z.infer<typeof PatchOperation>;
 export type RevisionDataT = z.infer<typeof RevisionData>;

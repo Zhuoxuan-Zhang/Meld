@@ -149,6 +149,32 @@ test("failed builds preserve approved designs and committed revisions reconcile 
     await write(api.service.jobFile(interruptedId), { id: interruptedId, projectId: p.id, projectVersion: p.version, type: "build", status: "running", phase: "build", createdAt: "", updatedAt: "", request: { requestKey: randomUUID() }, signature: "fixture" });
     await new ProjectService(api.options).recover(); p = await api.service.get(p.id);
     expect(p.latestBuild?.status).toBe("failed"); expect(p.activeJobId).toBeNull(); expect((await api.service.job(interruptedId)).error?.code).toBe("interrupted");
+    const stale = await api.service.storedJob(interruptedId);
+    await expect(api.service.progress({ ...stale, status: "running" }, "Late old worker update")).rejects.toThrow("replaced or interrupted");
+    expect((await api.service.job(interruptedId)).error?.code).toBe("interrupted");
+  } finally { await api.close(); }
+});
+
+test("UI repair feedback is bound to the delivered app and retries preserve the approved design", async () => {
+  const api = await projectServer();
+  try {
+    let p = await create(api, true);
+    const initial = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, { ...action(p), revision: p.currentDesignRevision }));
+    p = await api.service.get(p.id);
+    const revision = p.currentDesignRevision, preferences = p.featurePreferences, artifact = p.latestBuild!.artifacts[0];
+    const body = { ...action(p), revision, feedback: { buildId: initial.id, description: "Screen lock incorrectly abandons the timer." } };
+    const repaired = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, body));
+    expect(repaired.status).toBe("succeeded");
+    expect((await call<Job>(api, `/api/projects/${p.id}/builds`, body)).id).toBe(repaired.id);
+    const feedback = await json(path.join(api.root, "workflow/builds", initial.id, "runtime-findings.json"));
+    expect(feedback).toEqual({ apkSha256: artifact.sha256, issues: [body.feedback.description] });
+    p = await api.service.get(p.id); expect(p.currentDesignRevision).toBe(revision); expect(p.featurePreferences).toEqual(preferences);
+    const stale = await wait(api, await call<Job>(api, `/api/projects/${p.id}/builds`, { ...action(p), revision, feedback: body.feedback }));
+    expect(stale.error?.code).toBe("stale_build");
+    p = await api.service.get(p.id);
+    expect(p.lastDeliveredBuild?.id).toBe(repaired.id);
+    const invalid = await fetch(api.address + `/api/projects/${p.id}/builds`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...action(p), revision, feedback: { buildId: repaired.id, description: " " } }) });
+    expect(invalid.status).toBe(400);
   } finally { await api.close(); }
 });
 test("project API rejects foreign origins, oversized input and fabricated research snapshots", async () => {

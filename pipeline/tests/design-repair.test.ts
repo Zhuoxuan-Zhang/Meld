@@ -30,6 +30,22 @@ it('recognizes plain text palette roles while enforcing actual text contrast', (
   expect(paletteErrors(palette.map(token => token.role === 'text' ? { ...token, value: '#FFF8F0' } : token))).toContain('Insufficient contrast textPrimary/background');
 });
 
+it('checks parenthesized role descriptions without confusing text and background tokens', () => {
+  const palette = [
+    { role: 'primary (main green used for buttons, active tab, progress bar fill)', value: '#1B5E20' },
+    { role: 'onPrimary (text/icons drawn on top of primary green)', value: '#FFFFFF' },
+    { role: 'textPrimary (default body/heading text on background and surface)', value: '#1A1A16' },
+    { role: 'background (screen background, warm off-white earth tone)', value: '#FBF8F2' },
+    { role: 'surface (cards, dialogs, list rows, text fields)', value: '#FFFFFF' },
+  ];
+  expect(paletteErrors(palette)).toEqual([]);
+  const unreadable = palette.map(token => token.role.startsWith('textPrimary') ? { ...token, value: '#FBF8F2' } : token);
+  expect(paletteErrors(unreadable)).toEqual(['Insufficient contrast textPrimary/background', 'Insufficient contrast textPrimary/surface']);
+  const themed = ['Light', 'Dark'].flatMap(theme => palette.map(token => ({ ...token, role: `${theme} ${token.role}` })));
+  expect(paletteErrors(themed)).toEqual([]);
+  expect(paletteErrors(palette.filter(token => !token.role.startsWith('background')))).toContain('Insufficient contrast textPrimary/background');
+});
+
 it('reconciles draft reference lists only against exact authoritative tasks and selected options', async () => {
   const { applyDesignReferenceRepair } = await import('../src/design-repair.js');
   const draft = { scope: { core_tasks: ['Import a photo'] }, decisions: ['Use JPEG because it is compact'], features: [{ id: 'import', behavior: 'Choose a device photo' }] };

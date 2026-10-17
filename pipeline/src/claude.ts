@@ -7,7 +7,8 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { write, redact } from './storage.js';
 import { executeCodex, parseCodex } from './codex.js';
-import { executeClaudeCli, parseClaudeCli } from './claude-cli.js';
+import { executeClaudeCli, parseClaudeCli, claudeJsonSchema } from './claude-cli.js';
+import { recoverClaudeDesignFragment } from './model-recovery.js';
 
 export function parseMessage(response: any, schema: z.ZodType<any>) {
   if (response.stop_reason !== 'end_turn') throw new Error(`Incomplete/refused model response: ${response.stop_reason}`);
@@ -23,6 +24,7 @@ export function parseResponse(response: any, schema: z.ZodType<any>) {
 }
 export class Claude {
   sdk?: Anthropic | OpenAI;
+  lastCallId?: string;
   provider: 'anthropic' | 'openai' | 'codex_cli' | 'claude_cli';
   constructor(public root: string, public run: string, public state: any) {
     this.provider = state.config.provider || 'anthropic';
@@ -34,9 +36,9 @@ export class Claude {
     this.sdk = this.provider === 'openai' ? new OpenAI({ ...options, baseURL: 'https://api.openai.com/v1' }) : new Anthropic(options);
   }
   async ask<T>(label: string, prompt: string, context: any, schema: z.ZodType<T>, validate?: (x: T) => string[]): Promise<T> {
+    this.lastCallId = undefined;
     let repair: any = null; let networkRetries = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (this.state.calls.length >= this.state.config.max_calls) throw new Error('Model request budget exhausted; retain partial run and raise configured budget for a new run');
       const id = `${String(this.state.calls.length + 1).padStart(4, '0')}-${label}-${Date.now()}`;
       const dir = path.join(this.run, 'calls', id);
       const response_constraints = 'Be concise. Use short statements and avoid repeating the same limitations. App specs: at most five task features, three or four claims each, and four main pages/flows; aim for 4500 visible tokens. Unified design: aim for 7500 visible tokens while retaining every required development contract. Preserve uncertainty and all required schema fields.';
@@ -46,11 +48,16 @@ export class Claude {
         ? { provider: 'codex_cli', model: label.startsWith('design') ? this.state.config.design_model || 'gpt-6-astra' : this.state.config.model, reasoning_effort: label.startsWith('design') ? this.state.config.design_reasoning_effort || 'medium' : this.state.config.reasoning_effort || 'low', schema: zodTextFormat(schema, 'result').schema,
             prompt: `${prompt}\n\nUse ONLY the JSON context below as data. Do not use any tools or read files yourself; request evidence through Plan actions when applicable. Return only the requested JSON.\n${content}` }
         : this.provider === 'claude_cli'
-        ? { provider: 'claude_cli', model: this.state.config.model, reasoning_effort: this.state.config.reasoning_effort || 'low', schema: zodTextFormat(schema, 'result').schema,
+        ? { provider: 'claude_cli', model: this.state.config.model, reasoning_effort: this.state.config.reasoning_effort || 'low', schema: claudeJsonSchema(schema),
             system: prompt, prompt: `Use ONLY the JSON context below as data. Do not use any tools or read files yourself; request evidence through Plan actions when applicable. Return only the requested JSON.\n${content}` }
         : this.provider === 'openai'
         ? { model: this.state.config.model, store: false, max_output_tokens: this.state.config.max_output_tokens, instructions: prompt, input: [{ role: 'user', content }], reasoning: { effort: 'low' }, text: { format: zodTextFormat(schema, 'result') } }
         : { model: this.state.config.model, max_tokens: this.state.config.max_output_tokens, system: prompt, messages: [{ role: 'user' as const, content }], output_config: { format: zodOutputFormat(schema), effort: 'low' as const } };
+      if (attempt === 0 && this.provider === 'claude_cli') {
+        const recovered = await recoverClaudeDesignFragment(this.run, this.state, label, request, schema, validate);
+        if (recovered) { this.lastCallId = recovered.id; console.log(`Resume: validated saved fragment ${recovered.id}`); return recovered.value; }
+      }
+      if (this.state.calls.length >= this.state.config.max_calls) throw new Error('Model request budget exhausted; retain partial run and raise configured budget for a new run');
       const entry: any = { id, provider: this.provider, model: request.model, stage: label, attempt, success: false, started_at: new Date().toISOString() };
       this.state.calls.push(entry); await Promise.all([write(path.join(dir, 'request.json'), request), write(path.join(this.run, 'run.json'), this.state)]);
       console.log(`${this.provider}/${request.model} ${entry.id} (${this.state.calls.length}/${this.state.config.max_calls})`);
@@ -65,7 +72,7 @@ export class Claude {
         const errors = validate ? validate(value) : [];
         await Promise.all([write(path.join(dir, 'response.json'), response), write(path.join(dir, 'parsed.json'), value), write(path.join(dir, 'validation.json'), { passed: errors.length === 0, errors })]);
         if (errors.length) throw new Error(errors.join('\n'));
-        entry.success = true; await write(path.join(this.run, 'run.json'), this.state); return value;
+        entry.success = true; this.lastCallId = id; await write(path.join(this.run, 'run.json'), this.state); return value;
       } catch (e: any) {
         if (response) await write(path.join(dir, 'response.json'), response);
         const message = redact(e.message || String(e));

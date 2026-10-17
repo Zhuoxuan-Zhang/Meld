@@ -2,7 +2,7 @@ import { assessFit } from "../../frontend/src/feasibility";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DesignService, z, json, write, exists, withLock, semanticHash, WorkbenchError, ChangeRequest, ApplyRequest, RestoreRequest } from "../../pipeline/dist/src/integration.js";
+import { DesignService, z, json, write, exists, withLock, semanticHash, fileSha, WorkbenchError, ChangeRequest, ApplyRequest, RestoreRequest } from "../../pipeline/dist/src/integration.js";
 import type { BrowserEmulator } from "./emulator";
 import { PipelineJobs, DesignInput } from "./adapters/pipeline";
 import type { PipelineOptions } from "./adapters/pipeline";
@@ -23,7 +23,7 @@ export const ChangeAction = Action.extend({ baseRevision: key, text: z.string().
 export const ConfirmAction = Action.extend({ baseRevision: key.optional(), selectedChangeIds: z.array(key).max(8).optional(), selections: z.array(z.object({ conflict_id: z.string().min(1).max(96), option_id: z.string().min(1).max(96) }).strict()).max(30).optional() });
 export const RestoreAction = Action.extend({ baseRevision: key, targetRevision: key });
 export const OutlinePatch = z.object({ expectedVersion: z.number().int().positive(), baseRevision: key, document: HighLevelDocument }).strict();
-export const BuildAction = Action.extend({ revision: key });
+export const BuildAction = Action.extend({ revision: key, feedback: z.object({ buildId: key, description: z.string().trim().min(1).max(3000) }).strict().optional() });
 type StoredJob = Job & { projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
@@ -151,7 +151,11 @@ export class ProjectService {
       this.launch(() => this.run(job, work)); return this.job(job.id);
     }, 2000);
   }
-  async progress(job: StoredJob, phase: string) { job.phase = phase; await this.saveJob(job); }
+  async progress(job: StoredJob, phase: string) {
+    const project = await this.raw(job.projectId);
+    if (project.activeJobId !== job.id || project.version !== job.projectVersion) throw new WorkbenchError("stale_project", "This task was replaced or interrupted. Continue from the current project step.", 409);
+    job.phase = phase; await this.saveJob(job);
+  }
   async publish(job: StoredJob, work: (project: Project) => void | Promise<void>) {
     return this.mutate(job.projectId, async project => {
       if (project.version !== job.projectVersion || project.activeJobId !== job.id) throw new WorkbenchError("stale_project", "The project changed while this task was running.", 409);
@@ -368,6 +372,19 @@ export class ProjectService {
       const buildInput = await this.buildInput(id, input.revision);
       const directory = path.join(this.options.directory, "builds", job.id);
       await write(path.join(directory, "input.json"), { ...buildInput, projectProfile: project.brief });
+      if (input.feedback) {
+        const delivered = project.latestBuild?.status === "succeeded" ? project.latestBuild : project.lastDeliveredBuild;
+        if (!delivered || delivered.id !== input.feedback.buildId || delivered.revision !== input.revision || delivered.designHash !== buildInput.designHash) throw new WorkbenchError("stale_build", "Report a problem with the app built from your current design. Reload the project before continuing.", 409);
+        const owner = await this.storedJob(delivered.id);
+        if (owner.projectId !== id || owner.type !== "build" || owner.status !== "succeeded") throw new WorkbenchError("stale_build", "This app build is not available for repair.", 409);
+        const artifact = delivered.artifacts.find(item => item.name.endsWith(".apk"));
+        if (!artifact || path.basename(artifact.name) !== artifact.name) throw new WorkbenchError("artifact_missing", "The app download is unavailable. Build the app again.", 409);
+        const previousDirectory = path.join(this.options.directory, "builds", delivered.id), apk = path.join(previousDirectory, "artifacts", artifact.name);
+        if ((await fs.lstat(apk)).isSymbolicLink() || await fileSha(apk) !== artifact.sha256) throw new WorkbenchError("artifact_changed", "The app download changed. Build the app again before requesting a repair.", 409);
+        const findings = { apkSha256: artifact.sha256, issues: [input.feedback.description] };
+        await write(path.join(previousDirectory, "runtime-findings.json"), findings);
+        await write(path.join(directory, "user-feedback.json"), { sourceBuildId: delivered.id, ...findings });
+      }
       await this.publish(job, p => { p.approvedRevision = input.revision; p.latestBuild = { id: job.id, revision: input.revision, designHash: buildInput.designHash, status: "running", artifacts: [] }; });
       if (!this.options.build) throw new WorkbenchError("build_unavailable", "The Android build environment is not configured.", 503);
       const result = await this.options.build({ project, revision: input.revision, design: buildInput, designHash: buildInput.designHash, directory, progress: phase => this.progress(job, phase) });

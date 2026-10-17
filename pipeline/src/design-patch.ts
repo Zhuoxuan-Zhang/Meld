@@ -17,7 +17,8 @@ export function applyDesignPatch(source: unknown, patch: z.infer<typeof DesignPa
       let key = segment;
       if (Array.isArray(parent) && i === keys.length - 1 && segment === '-') key = String(parent.length);
       if (Array.isArray(parent) && segment !== '-' && !/^(0|[1-9]\d*)$/.test(segment)) {
-        const matches = parent.flatMap((item: any, index: number) => item && typeof item === 'object' && item.id === segment ? [index] : []);
+        const matches = parent.flatMap((item: any, index: number) => item && typeof item === 'object' && (item.id === segment || item.id == null && item.name === segment) ? [index] : []);
+        if (matches.length > 1) throw new Error(`Design edit has an ambiguous item name: ${edit.path.join('.')}`);
         if (matches.length === 1) key = String(matches[0]);
       }
       const append = Array.isArray(parent) && i === keys.length - 1 && key === String(parent.length);

@@ -1,0 +1,18 @@
+{
+  "core": {
+    "title": "Forest Core",
+    "avd": "MeldForestCore",
+    "port": 5584,
+    "case": "forest-core",
+    "buildId": "job-4a4df663-3d6b-47b4-afd1-8b9dc37c1559",
+    "sha256": "3f9013c452094afb63e3509f3486b334d8ab88de8fddce516bc0bb82b568f8d3"
+  },
+  "plus-two": {
+    "title": "Forest Plus Two - Tasks and Reflections",
+    "avd": "MeldForestPlusTwo",
+    "port": 5578,
+    "case": "forest-two",
+    "buildId": "job-cda27d6e-1a71-43e5-a1ae-c9fd414dd380",
+    "sha256": "5c81437d439ee53a2ca7f306f5358867513ec7ce511eaf44e2e4c773fc4b6848"
+  }
+}

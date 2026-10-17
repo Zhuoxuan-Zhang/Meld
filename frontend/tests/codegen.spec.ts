@@ -3,10 +3,36 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { generateSources, checkSourcePaths, recoverCompletedBatch, recoverRepairPrefix, applySourceEdits } from "../../backend/src/codegen";
-import { write } from "../../pipeline/dist/src/integration.js";
+import { write, fileSha } from "../../pipeline/dist/src/integration.js";
+import { readRuntimeFeedback, approvedOutlineForBuild } from "../../backend/src/build";
+import { parseClaudeCli } from "../../pipeline/dist/src/claude-cli.js";
 
 const main = "app/src/main/java/generated/MainActivity.kt";
 const tests = "app/src/test/java/generated/RulesTest.kt";
+test("the builder receives explicit operations only from the outline approved for its developer revision", () => {
+  const outline = { revision: "hl-v0002", approvedRevision: "hl-v0002", developerRevision: "v0001-current", document: { features: [{ steps: ["Create, edit, check and delete a task"] }] } };
+  expect(approvedOutlineForBuild({ highLevelDesign: outline } as any, "v0001-current")).toEqual({ revision: outline.revision, document: outline.document });
+  expect(approvedOutlineForBuild({ highLevelDesign: { ...outline, approvedRevision: "hl-v0001" } } as any, "v0001-current")).toBeNull();
+  expect(approvedOutlineForBuild({ highLevelDesign: outline } as any, "v0001-old")).toBeNull();
+  expect(approvedOutlineForBuild({}, "v0001-current")).toBeNull();
+});
+test("code-module execution budgets accept completed structured responses including their reasoning usage", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-module-budget-"));
+  try {
+    const labels: string[] = [];
+    const ask: any = async (_dir: string, label: string, _instructions: string, data: any, schema: any, budget: number) => {
+      labels.push(label);
+      if (label === "source-plan") return { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: tests, responsibility: "tests" }] };
+      if (label === "repair-plan-0") return { interfaces: [], files: [{ path: main, responsibility: "fix" }] };
+      const result = label.startsWith("repair-file") ? { path: main, edits: [{ find: "old", replace: "fixed" }] } : { path: data.requestedFile.path, content: "package generated\n// Synthetic source" };
+      return parseClaudeCli({ execution: { code: 0 }, turn_completed: true, errors: [], tool_activity: false, usage: { output_tokens: 12313 }, final_text: JSON.stringify(result) }, schema, budget);
+    };
+    await generateSources(directory, 0, "fixture", {}, null, [], async () => {}, ask);
+    const repaired = await generateSources(directory, 0, "fixture", {}, { files: [{ path: main, content: "old" }], explanation: "fixture" }, ["fix"], async () => {}, ask);
+    expect(repaired.files[0].content).toBe("fixed");
+    expect(labels).toEqual(["source-plan", "file-0", "file-1", "repair-plan-0", "repair-file-0-0"]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 test("modular generation requests each planned file and keeps exact shared contracts", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-"));
   const calls: any[] = [];
@@ -38,6 +64,33 @@ test("a module cannot replace a different planned file", async () => {
   const ask: any = async (_dir: string, label: string) => label === "source-plan" ? { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: tests, responsibility: "test" }] } : { path: tests, content: "wrong file" };
   try { await expect(generateSources(directory, 0, "fixture", {}, null, [], async () => {}, ask)).rejects.toThrow("does not match"); }
   finally { await rm(directory, { recursive: true, force: true }); }
+});
+test("repair schemas bind the exact module and a rejected foreign-file patch retries without applying it", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-path-"));
+  const prior = { files: [{ path: main, content: "old" }, { path: tests, content: "keep tests" }], explanation: "fixture" };
+  const labels: string[] = [];
+  try {
+    const ask: any = async (_dir: string, label: string, _instructions: string, data: any, schema: any) => {
+      labels.push(label);
+      if (label.startsWith("repair-plan")) return { interfaces: [], files: [{ path: main, responsibility: "fix launcher" }] };
+      const wrong = { path: tests, edits: [{ find: "keep tests", replace: "wrongly changed" }] };
+      expect(schema.safeParse(wrong).success).toBe(false);
+      expect(data.currentFiles).toEqual(prior.files);
+      if (label.endsWith("edit-retry")) {
+        expect(data.rejectedPatch).toEqual(wrong);
+        return { path: main, edits: [{ find: "old", replace: "fixed" }] };
+      }
+      // Exercise the path guard too, even if a provider bypasses the schema.
+      return wrong;
+    };
+    const result = await generateSources(directory, 0, "fixture", {}, prior, ["fix"], async () => {}, ask);
+    expect(labels).toEqual(["repair-plan-0", "repair-file-0-0", "repair-file-0-0-edit-retry"]);
+    expect(result.files).toEqual([{ path: main, content: "fixed" }, prior.files[1]]);
+    const second = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-path-reject-"));
+    try {
+      await expect(generateSources(second, 0, "fixture", {}, prior, ["fix"], async () => {}, (async (_dir: string, label: string) => label.startsWith("repair-plan") ? { interfaces: [], files: [{ path: main, responsibility: "fix" }] } : { path: tests, edits: [{ find: "keep tests", replace: "wrong" }] }) as any)).rejects.toThrow("does not match");
+    } finally { await rm(second, { recursive: true, force: true }); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 test("interrupted module generation resumes its ordered checkpoint without regenerating completed files", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-"));
@@ -88,7 +141,7 @@ test("accepted repair responses resume an interrupted prefix and reject an inval
   const plan = { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: tests, responsibility: "tests" }] };
   const response = (value: any, tokens = 100) => ({ execution: { code: 0 }, turn_completed: true, errors: [], tool_activity: false, usage: { output_tokens: tokens }, final_text: JSON.stringify(value) });
   try {
-    await write(path.join(directory, "repair-plan-0-1/response.json"), response(plan));
+    await write(path.join(directory, "repair-plan-0-1/response.json"), response(plan, 13984));
     await write(path.join(directory, "repair-plan-0-1/prompt.txt"), "instructions\n" + JSON.stringify({ prior, integration: { manifest: "fixture-manifest" }, issues: ["fix"], approvedDesign: { title: "fixture" }, appProfile: { name: "fixture" } }));
     await write(path.join(directory, "repair-file-0-0-2/response.json"), response({ path: main, content: "fixed" }));
     await write(path.join(directory, "repair-file-0-1-3/response.json"), { ...response({ path: tests, content: "new tests" }), errors: ["incomplete"] });
@@ -101,6 +154,53 @@ test("accepted repair responses resume an interrupted prefix and reject an inval
     const calls: string[] = [];
     const resumed = await generateSources(directory, 0, "fixture", {}, prior, ["fix"], async () => {}, (async (_dir: string, label: string, _instructions: string, data: any) => { calls.push(label); return { path: data.requestedFile.path, edits: [{ find: "keep", replace: "resumed tests" }] }; }) as any);
     expect(calls).toEqual(["repair-file-0-1"]); expect(resumed.files[0].content).toBe("fixed"); expect(resumed.files[1].content).toBe("resumed tests");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("a saved repair plan survives failure before its first module", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-codegen-"));
+  const prior = { files: [{ path: main, content: "old" }, { path: tests, content: "keep" }], explanation: "fixture" };
+  let plans = 0;
+  const ask: any = async (_dir: string, label: string, _instructions: string, _data: any, _schema: any, budget: number) => {
+    if (label.startsWith("repair-plan")) { plans++; expect(budget).toBeGreaterThanOrEqual(13984); return { interfaces: [], files: [{ path: main, responsibility: "launcher" }] }; }
+    throw new Error("Synthetic connection loss");
+  };
+  try {
+    await expect(generateSources(directory, 0, "fixture", {}, prior, ["fix"], async () => {}, ask)).rejects.toThrow("connection loss");
+    const result = await generateSources(directory, 0, "fixture", {}, prior, ["fix"], async () => {}, (async (_dir: string, label: string) => {
+      expect(label).toBe("repair-file-0-0"); return { path: main, edits: [{ find: "old", replace: "fixed" }] };
+    }) as any);
+    expect(plans).toBe(1); expect(result.files[0].content).toBe("fixed");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("device findings survive a failed build retry and remain bound to the APK, project and design", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-feedback-"));
+  const tested = "job-11111111-1111-4111-8111-111111111111", retry = "job-22222222-2222-4222-8222-222222222222";
+  const expected = { projectId: "fixture-project", revision: "v0001", designHash: "fixture-hash" };
+  try {
+    for (const id of [tested, retry]) await write(path.join(directory, id, "input.json"), expected);
+    await write(path.join(directory, retry, "retry-source.json"), { previousBuildId: tested });
+    const apk = path.join(directory, tested, "source/app/build/outputs/apk/debug/app-debug.apk");
+    await write(apk, "Synthetic unit-test APK bytes");
+    await write(path.join(directory, tested, "runtime-findings.json"), { apkSha256: await fileSha(apk), issues: ["Rotation abandons the active timer"] });
+    expect((await readRuntimeFeedback(directory, retry, expected))?.previousBuildId).toBe(tested);
+    expect(await readRuntimeFeedback(directory, retry, { ...expected, projectId: "foreign" })).toBeNull();
+    expect(await readRuntimeFeedback(directory, retry, { ...expected, revision: "v0002" })).toBeNull();
+    await rm(path.join(directory, retry, "retry-source.json"));
+    await write(path.join(directory, retry, "update-source.json"), { previousBuildId: tested });
+    expect((await readRuntimeFeedback(directory, retry, expected))?.previousBuildId).toBe(tested);
+    const deliveredApk = path.join(directory, tested, "artifacts/app.apk");
+    await write(deliveredApk, "Delivered test APK differs from a later debug build");
+    await write(path.join(directory, tested, "runtime-findings.json"), { apkSha256: await fileSha(deliveredApk), issues: ["Screen sleep fails focus"] });
+    expect((await readRuntimeFeedback(directory, retry, expected))?.issues).toEqual(["Screen sleep fails focus"]);
+    await write(path.join(directory, retry, "artifacts.json"), []);
+    expect(await readRuntimeFeedback(directory, retry, expected)).toBeNull();
+    await rm(path.join(directory, retry, "artifacts.json"));
+    await rm(deliveredApk);
+    await write(path.join(directory, tested, "runtime-findings.json"), { apkSha256: await fileSha(apk), issues: ["Rotation abandons the active timer"] });
+    await write(apk, "Changed bytes");
+    await expect(readRuntimeFeedback(directory, retry, expected)).rejects.toThrow("do not match");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

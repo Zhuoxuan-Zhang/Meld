@@ -10,9 +10,11 @@ export function handoffBody(draft: Draft) {
   if (apps.some(a => !a.market || a.id !== draft.baseAppId && !a.market.listedFeatures)) throw new Error("Choose live apps with completed feature summaries for your selected improvements.");
   const scans = Object.values(draft.market || {}).filter(s => apps.some(a => s.apps.some(x => x.appId === a.id && !x.retained)));
   if (!scans.length || scans.some(s => !s.scanId) || apps.some(a => !scans.some(s => s.apps.some(x => x.appId === a.id && !x.retained)))) throw new Error("Rescan your domains to save the references for this build.");
+  const base = apps.find(app => app.id === draft.baseAppId);
+  const fallback = base ? `Build around ${base.name}'s primary purpose and core user loop. Adapt the selected and custom features as improvements to this base.` : `Build ${draft.name} from the selected features.`;
   return {
     ...(draft.baseAppId ? { baseAppId: draft.baseAppId } : {}),
-    brief: { input: (draft.discoverySource !== "domains" ? intentBrief(draft.intent) : "") || draft.goal || draft.description || `Build ${draft.name} from the selected features.`, name: draft.name.trim(), audience: draft.audience, purpose: draft.description, goal: draft.goal, style: draft.style, domains: draft.domains },
+    brief: { input: (draft.discoverySource !== "domains" ? intentBrief(draft.intent) : "") || draft.goal || draft.description || fallback, name: draft.name.trim(), audience: draft.audience, purpose: draft.description, goal: draft.goal, style: draft.style, domains: draft.domains },
     scanIds: scans.map(s => s.scanId!),
     references: apps.map(a => ({ appId: a.id, features: a.features.filter(f => draft.selected[a.id]?.includes(f.id)).map(({ id, name, description }) => ({ id, name, description })) })),
   };

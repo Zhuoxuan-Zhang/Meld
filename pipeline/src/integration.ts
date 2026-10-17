@@ -13,7 +13,7 @@ export { z } from 'zod';
 export { Decisions, Comparison, Review } from './schemas.js';
 export { validateDecisions } from './validate.js';
 export { executeCodex } from './codex.js';
-export { executeClaudeCli, parseClaudeCli } from './claude-cli.js';
+export { executeClaudeCli, parseClaudeCli, claudeJsonSchema } from './claude-cli.js';
 export type { DesignModel } from './workbench/model.js';
 export type { RevisionDataT, UserDocumentT, ChangePlanT } from './workbench/schemas.js';
 export type DesignView = Awaited<ReturnType<import('./workbench/service.js').DesignService['get']>>;

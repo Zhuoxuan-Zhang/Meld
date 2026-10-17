@@ -6,6 +6,7 @@ import { projectsMiddleware, projectOptionsFromEnv, defaultAvailability } from "
 import { readBody, send } from "../../backend/src/http";
 import { z, WorkbenchError, withLock, semanticHash, exists, json, write } from "../../pipeline/dist/src/integration.js";
 import { SignalsStore } from "./signals";
+import { withSavedFeatureSummaries } from "./feature-summaries";
 import { assessFit } from "../src/feasibility";
 import type { ApiPlugin } from "./design-http";
 
@@ -15,8 +16,8 @@ export const Handoff = z.object({ requestKey: z.string().uuid(), projectId: z.st
   return ids.length <= 20 && new Set(ids).size === ids.length && Boolean(input.projectId) === (input.expectedVersion !== undefined);
 }, "Choose up to 20 distinct features.").refine(input => (!input.baseAppId || input.references.some(app => app.appId === input.baseAppId)) && input.references.every(app => app.features.length > 0 || app.appId === input.baseAppId), "Choose a base from your reference apps and features for each enhancement app.");
 
-// Imported listings always come from immutable server snapshots. Feature text
-// is saved separately as explicit user preferences, never as APK evidence.
+// Imported listings come from immutable server snapshots. Completed summaries
+// come from server extraction records; selections remain user preferences.
 export async function importSelection(service: ProjectService, signals: SignalsStore, input: z.infer<typeof Handoff>) {
   const file = path.join(service.options.directory, "meld-handoffs", `${input.requestKey}.json`);
   return withLock(`${file}.lock`, async () => {
@@ -26,7 +27,7 @@ export async function importSelection(service: ProjectService, signals: SignalsS
       if (receipt.signature !== signature) throw new WorkbenchError("idempotency_conflict", "This request was already used for other choices.", 409);
       return service.get(receipt.id);
     }
-    const scans = await Promise.all(input.scanIds.map(id => signals.read(id)));
+    const scans = await withSavedFeatureSummaries(await Promise.all(input.scanIds.map(id => signals.read(id))), path.join(path.dirname(signals.directory), "features"));
     if (new Set(input.references.map(a => a.appId)).size !== input.references.length) throw new WorkbenchError("invalid_reference", "Choose each reference app once.", 400);
     for (const selected of input.references) {
       const scan = scans.find(s => s.apps.some(a => a.appId === selected.appId && !a.retained));

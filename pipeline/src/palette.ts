@@ -8,7 +8,10 @@ export function contrast(a: string, b: string): number {
   return (x + .05) / (y + .05);
 }
 export function paletteErrors(tokens: { role: string; value: string }[]): string[] {
-  const normalized = tokens.map(token => ({ name: token.role.split(/\s[—–]\s|:\s/)[0].toLowerCase().replace(/[^a-z]/g, ''), value: token.value }));
+  // Descriptions are not part of a role's identity. In particular, words such
+  // as "background" inside a text-color description must not select that
+  // text color as the background and produce a false contrast failure.
+  const normalized = tokens.map(token => ({ name: token.role.split(/\s[—–]\s|:\s|\s*\(/)[0].toLowerCase().replace(/[^a-z]/g, ''), value: token.value }));
   const themes = ['light', 'dark'].filter(theme => normalized.some(token => token.name.startsWith(theme)));
   const errors: string[] = tokens.filter(token => !/^#[\da-f]{6}$/i.test(token.value)).map(token => `Invalid color ${token.role}: use only #RRGGBB in value; put descriptions in role`);
   for (const theme of themes.length ? themes : ['']) {
