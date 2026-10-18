@@ -40,11 +40,31 @@ with tempfile.TemporaryDirectory() as directory:
  assert state['scrolls']==2, 'A navigation-obscured target was accepted as reachable'
  assert state['actions']==['hide-keyboard','app-scroll','app-scroll']
  assert state['tapped']=='star sticker'
+ picker={'opened':False,'query':None,'picked':False}
+ def picker_tree():
+  if picker['query']:
+   return E.fromstring('<hierarchy><node content-desc="image-editor-original.jpg, fixture" enabled="true" bounds="[20,140][150,260]"/></hierarchy>')
+  if picker['opened']:
+   return E.fromstring('<hierarchy><node class="android.widget.AutoCompleteTextView" resource-id="android:id/search_src_text" enabled="true" bounds="[50,36][420,108]"/></hierarchy>')
+  return E.fromstring('<hierarchy><node content-desc="Search" enabled="true" bounds="[336,36][408,108]"/><node content-desc="unrelated export.jpg, fixture" bounds="[20,140][150,260]"/></hierarchy>')
+ def picker_adb(*args):
+  if 'text' in args:picker['query']=args[-1]
+  if 'tap' in args:
+   if not picker['opened']:picker['opened']=True
+   elif picker['query']:
+    assert args[-2:]==('35','245'), 'Select the result outside its preview icon'
+    picker['picked']=True
+  return b''
+ h['n'].tree=picker_tree;h['n'].adb=picker_adb;h['time'].sleep=lambda _:None
+ h['select_photo']('image-editor-original.jpg')
+ assert picker['picked'] and picker['query']=='image-editor-original.jpg'
+ state['pickerSearch']=picker
  print(json.dumps(state))
 `;
   const result = spawnSync('python3', ['-c', script, source], { encoding: 'utf8', timeout: 15000 });
   expect(result.status, result.stderr || result.stdout).toBe(0);
   expect(JSON.parse(result.stdout).tapped).toBe('star sticker');
+  expect(JSON.parse(result.stdout).pickerSearch.picked).toBe(true);
 });
 
 

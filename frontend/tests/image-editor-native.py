@@ -49,14 +49,31 @@ APK=pathlib.Path(sys.argv[1]);snapshot=ROOT/'qa-current.apk';shutil.copyfile(APK
 PKG=sys.argv[2];cases=[]
 if not re.fullmatch(r'com\.meld\.apps\.p[a-f0-9]+',PKG):raise SystemExit('Use an isolated generated app package.')
 def select_photo(filename):
- if not any((x.get('content-desc') or '').startswith(filename+',') for x in n.tree().iter('node')):
-  for _ in range(5):n.adb('shell','input','swipe','240','300','240','800','200')
- for _ in range(10):
-  options=[x for x in n.tree().iter('node') if (x.get('content-desc') or '').startswith(filename+',')]
-  if len(options)==1:
-   b=bounds(options[0]);n.adb('shell','input','tap',str(b[0]+15),str(b[3]-15));return
-  n.adb('shell','input','swipe','240','800','240','300','350')
- raise HarnessSelectorError('Test photo is not reachable in the system picker: '+filename)
+ # Query the isolated synthetic fixture rather than scrolling a growing Recent feed.
+ if not re.fullmatch(r'image-editor-(?:original|camera-12mp)\.jpg',filename):raise HarnessSelectorError('Unexpected fixture name')
+ def result(current):
+  matches=[x for x in current.iter('node') if (x.get('content-desc') or '').startswith(filename+',') and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>40 and bounds(x)[3]>130]
+  if len(matches)>1:raise HarnessSelectorError('Ambiguous test photo: '+filename)
+  return matches[0] if matches else None
+ current=n.tree();node=result(current)
+ if node is None:
+  search=[x for x in current.iter('node') if x.get('content-desc')=='Search' and x.get('enabled')=='true']
+  if search:
+   b=bounds(search[0]);n.adb('shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2))
+  for _ in range(6):
+   fields=[x for x in n.tree().iter('node') if (x.get('resource-id') or '').endswith(':id/search_src_text') and x.get('enabled')=='true']
+   if fields:break
+   time.sleep(.2)
+  if not fields:raise HarnessSelectorError('The document picker search field is unavailable')
+  b=bounds(fields[0]);n.adb('shell','input','tap',str((b[0]+b[2])//2),str((b[1]+b[3])//2))
+  n.adb('shell','input','keyevent','123');n.adb('shell','input','keyevent',*(['67']*80));n.adb('shell','input','text',filename);n.adb('shell','input','keyevent','66')
+  for _ in range(10):
+   node=result(n.tree())
+   if node is not None:break
+   time.sleep(.3)
+ if node is None:raise HarnessSelectorError('Test photo was not found by document search: '+filename)
+ b=bounds(node);n.adb('shell','input','tap',str(b[0]+15),str(b[3]-15))
+
 def passed(name):
  cases.append({'case':name,'passed':True})
  (ROOT/'runtime-progress.json').write_text(json.dumps({'status':'running','apkSha256':digest,'packageId':PKG,'cases':cases},indent=2))
