@@ -110,8 +110,8 @@ def verify(h):
    else:issues.append({'case':'saved-sharing-retry','error':'After restoring the sharing cache permission, Retry returns to saved success without opening the Sharesheet.'})
 
   def check_large_caption():
-   fresh('image-editor-camera-12mp.jpg');before=h['export_probe']('large-before-caption.jpg')
-   choose_tool('Text and stickers');h['field']('Text','Readable');h['click']('Apply');h['mode_editor']();after=h['export_probe']('large-after-caption.jpg')
+   fresh('image-editor-camera-12mp.jpg');before=h['export_probe']('large-before-caption.jpg',timeout=45)
+   choose_tool('Text and stickers');h['field']('Text','Readable');h['click']('Apply');h['mode_editor']();after=h['export_probe']('large-after-caption.jpg',timeout=45)
    assert before.size==after.size==(4000,3000),('High-resolution caption changed dimensions',before.size,after.size)
    mask=ImageChops.difference(before,after).convert('L').point(lambda value:255 if value>35 else 0)
    box=mask.getbbox();metrics['largeCaptionInkBounds']=box

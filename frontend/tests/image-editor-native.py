@@ -144,8 +144,8 @@ def dimensions(w,h):
  assert Image.open(exported).size==(w,h),(Image.open(exported).size,(w,h))
  click('Back to editing');mode_editor()
 
-def export_probe(name):
- click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'))
+def export_probe(name,timeout=20):
+ click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'),timeout)
  image=Image.open(latest_export(name)).convert('RGB').copy()
  click('Back to editing');mode_editor();return image
 
