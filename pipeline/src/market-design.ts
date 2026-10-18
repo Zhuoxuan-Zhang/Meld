@@ -5,6 +5,7 @@ import { synthesize } from './design.js';
 import { validateSpecData, validateEvidence, validateDesign, validateComparison, validateDecisions } from './validate.js';
 import { exists, json, write, fileSha, sha } from './storage.js';
 import { pipelineRoot } from './integration.js';
+import { loadReferenceObservations } from './observation.js';
 
 // A proposed product design from store signals and any validated APK analyses.
 // This runner never manufactures APK identities or static/runtime verification.
@@ -14,6 +15,10 @@ async function execute() {
   while (args.length) { const name = args.shift()!; const value = args.shift(); if (!['--run', '--brief', '--market', '--config', '--static-run'].includes(name) || !value) throw new Error('Invalid market-design argument'); options[name.slice(2)] = value; }
   const run = path.resolve(options.run), brief = await json(options.brief), config = await json(options.config), market = await json(options.market);
   const specs: any[] = [], locks: any[] = [], provenance: any[] = [];
+  if (options['static-run']) {
+    const observations = await loadReferenceObservations(path.resolve(options['static-run']));
+    if (observations.length) brief.market_signals = { ...brief.market_signals, reference_observations: observations };
+  }
   if (options['static-run'] && await exists(path.join(options['static-run'], 'run.json'))) {
     const source = path.resolve(options['static-run']), state = await json(path.join(source, 'run.json'));
     if (await exists(path.join(source, 'apps.lock.json'))) for (const app of await json(path.join(source, 'apps.lock.json'))) {

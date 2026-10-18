@@ -6,8 +6,9 @@ import { buildModelJson as modelJson } from "./model";
 import { sha } from "../../pipeline/dist/src/storage.js";
 import { generateSources, SourceFiles, recoverCompletedBatch, recoverRepairPrefix } from "./codegen";
 import type { BuildRunner } from "./projects";
+import { uiValidationEntry, uiReferenceContext, validateBuiltUi } from "./ui-validation";
 
-export type AndroidEnvironment = { sdk: string; javaHome: string; templateDirectory: string; nativeSmoke?: { projectId: string; script: string; adb: string; serial: string; output: string } };
+export type AndroidEnvironment = { sdk: string; javaHome: string; templateDirectory: string; uiValidationConfig?: string; nativeSmoke?: { projectId: string; script: string; adb: string; serial: string; output: string } };
 const Files = SourceFiles;
 const isHarnessFailure = (message: string) => /\n(?:TypeError|FileNotFoundError|ModuleNotFoundError|subprocess\.CalledProcessError):/.test(message) || message.startsWith("Native harness");
 export function implementationReviewPassed(review: { passed: boolean; issues: string[] }) {
@@ -54,6 +55,9 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
   return async input => {
     if (!(await exists(path.join(environment.sdk, "platforms/android-35/android.jar"))) || !(await exists(path.join(environment.javaHome, "bin/java")))) throw new WorkbenchError("build_environment", "Configure Android SDK 35 and JDK 17+ on the backend before building.", 503);
     const source = path.join(input.directory, "source"), model = path.join(input.directory, "model"), packageId = `com.meld.apps.p${input.project.id.replace(/[^a-f0-9]/g, "").slice(-24)}`;
+    const uiEntry = await uiValidationEntry(environment.uiValidationConfig, input.project.id, input.project.featurePreferences?.baseAppId);
+    const visualReference = uiEntry ? await uiReferenceContext(uiEntry) : null;
+    let uiReport: Awaited<ReturnType<typeof validateBuiltUi>> | null = null;
     await fs.mkdir(source, { recursive: true }); await fs.cp(environment.templateDirectory, source, { recursive: true });
     await write(path.join(source, "settings.gradle.kts"), `pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name = "GeneratedApp"\ninclude(":app")\n`);
     await write(path.join(source, "build.gradle.kts"), 'plugins { id("com.android.application") version "8.10.1" apply false; id("org.jetbrains.kotlin.android") version "2.1.20" apply false; id("org.jetbrains.kotlin.plugin.compose") version "2.1.20" apply false; id("com.google.devtools.ksp") version "2.1.20-2.0.1" apply false }\n');
@@ -167,7 +171,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
     let runtimeReport: any = null;
     for (let round = 0; round < 5; round++) {
       await input.progress(round ? "Correcting app implementation checks…" : "Implementing your approved app design…");
-      const output = round === 0 && rebuildOnly ? Files.parse(prior) : await generateSources(model, round, instructions, { appProfile: input.project.brief, approvedDesign: input.design, integration, packageId }, prior as any, issues, input.progress);
+      const output = round === 0 && rebuildOnly ? Files.parse(prior) : await generateSources(model, round, instructions + " Use visualReference.visualBrief and approvedDesign.brief.market_signals.reference_observations when supplied: implement their applicable visual hierarchy, spacing, typography, density and control grouping within the approved appearance. Keep the primary canvas/content prominent. Address screenshot review repair instructions concretely. Unavailable observations do not establish a reference UI. Never replace deliberate app layout with a generic card stack.", { appProfile: input.project.brief, approvedDesign: input.design, visualReference, integration, packageId }, prior as any, issues, input.progress);
       if (round === 0 && rebuildOnly) await write(path.join(model, "implementation-0.json"), output);
       if (new Set(output.files.map(f => f.path)).size !== output.files.length || !output.files.some(f => f.path === "app/src/main/java/generated/MainActivity.kt") || !output.files.some(f => f.path.startsWith("app/src/test/java/generated/"))) throw new WorkbenchError("invalid_code", "Generated app files are incomplete.", 422);
       const mainFile = output.files.find(f => f.path === "app/src/main/java/generated/MainActivity.kt")!;
@@ -186,6 +190,19 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
         try { runtimeReport = await nativeCheck(environment.nativeSmoke, path.join(source, "app/build/outputs/apk/debug/app-debug.apk"), packageId, input.directory, round); }
         catch (error) { prior = output; issues = [(error as Error).message]; await write(path.join(input.directory, "failure.json"), { issues }); if (error instanceof WorkbenchError && error.code === "native_harness") throw error; continue; }
       }
+      uiReport = null;
+      if (uiEntry) {
+        await input.progress("Comparing your app screens with the original reference…");
+        uiReport = await validateBuiltUi(uiEntry, path.join(source, "app/build/outputs/apk/debug/app-debug.apk"), packageId, path.join(input.directory, `ui-round-${round}`), input.design, visualReference!.manifestSha256);
+        if (!uiReport.passed) {
+          if (uiReport.review.verdict === "unknown") throw new WorkbenchError("ui_evidence_missing", "UI comparison needs complete matching original and candidate scenarios. Diagnostics are saved.", 422);
+          prior = output;
+          issues = [...uiReport.review.repairInstructions, ...uiReport.review.scenarios.flatMap(scenario => [...scenario.visualIssues, ...scenario.behaviorIssues])];
+          if (!issues.length) issues = ["The screenshot review failed. Correct the visual hierarchy, layout and readability against the supplied visual reference and approved design."];
+          await write(path.join(input.directory, "failure.json"), { issues, uiReview: uiReport });
+          continue;
+        }
+      }
       await input.progress("Checking the implementation against your design…");
       const review = await modelJson(model, `review-${round}`, "Review the Android app against the user-facing approved high-level design and the detailed implementation contract. Prioritize usable primary workflows and combinations of features, data integrity, privacy and actual crashes. A missing or broken primary feature is blocking. Distinguish reproducible ordinary-use defects from visual polish, rare boundary cases, optional refinements and platform guarantees outside app control. Record the latter as explicit follow-ups, not release blockers for this MVP. Prefix each issue [blocking] or [follow-up]. passed=true requires every approved primary feature to be implemented and no blocking issue; follow-ups may remain and must be recorded. Do not raise speculative compiler errors when the supplied exact sources have already passed compilation. Review the actual implementation, not just test existence. Remain concise: at most ten important issues and concise acceptance checks, about 1200 output words. This is static model review, not runtime verification.", { appProfile: input.project.brief, approvedDesign: input.design, integration, files: output.files, completedChecks: { assembleDebug: true, testDebugUnitTest: true, lintDebug: true } }, Review, 16000, "medium", 600000);
       await write(path.join(input.directory, `review-${round}.json`), review);
@@ -200,14 +217,19 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
       }
       if (!testsRun || failedTests) { prior = output; issues = ["Provide meaningful JUnit tests that actually execute and pass; no tests or failed tests were reported."]; continue; }
       const apk = path.join(source, "app/build/outputs/apk/debug/app-debug.apk");
+      if (uiReport && uiReport.candidateApkSha256 !== await fileSha(apk)) throw new WorkbenchError("ui_apk_changed", "The APK changed after its UI review; create a new build.", 409);
       await checkApk(apk, path.join(input.directory, "apk-check.json"));
       const artifacts = path.join(input.directory, "artifacts"); await fs.mkdir(artifacts, { recursive: true });
       await fs.copyFile(apk, path.join(artifacts, "app.apk")); await write(path.join(artifacts, "approved-design.json"), input.design);
-      await write(path.join(artifacts, "build-report.json"), { projectId: input.project.id, revision: input.revision, designHash: input.designHash, packageId, review, build: true, unitTests: true, lint: true, runtimeVerified: Boolean(runtimeReport) });
+      await write(path.join(artifacts, "build-report.json"), { projectId: input.project.id, revision: input.revision, designHash: input.designHash, packageId, review, build: true, unitTests: true, lint: true, runtimeVerified: Boolean(runtimeReport), visualVerified: Boolean(uiReport?.passed) });
+      if (uiReport) {
+        await write(path.join(artifacts, "ui-validation.json"), uiReport);
+        await fs.copyFile(path.join(input.directory, `ui-round-${round}`, "comparison/comparison.html"), path.join(artifacts, "ui-comparison.html"));
+      }
       if (runtimeReport) await write(path.join(artifacts, "runtime-report.json"), runtimeReport);
-      const metadata = await Promise.all(["app.apk", "approved-design.json", "build-report.json", ...(runtimeReport ? ["runtime-report.json"] : [])].map(async name => ({ name, url: `/api/projects/${input.project.id}/builds/${path.basename(input.directory)}/artifacts/${name}`, sha256: await fileSha(path.join(artifacts, name)) })));
+      const metadata = await Promise.all(["app.apk", "approved-design.json", "build-report.json", ...(runtimeReport ? ["runtime-report.json"] : []), ...(uiReport ? ["ui-validation.json", "ui-comparison.html"] : [])].map(async name => ({ name, url: `/api/projects/${input.project.id}/builds/${path.basename(input.directory)}/artifacts/${name}`, sha256: await fileSha(path.join(artifacts, name)) })));
       await write(path.join(input.directory, "artifacts.json"), metadata);
-      return { artifacts: metadata, validation: { build: true, unitTests: true, lint: true, runtimeVerified: Boolean(runtimeReport), limitations: [...(runtimeReport ? ["Native smoke interactions passed on the recorded Android emulator. Other devices and all failure paths are not covered."] : ["Static implementation review and Gradle checks passed. Device/emulator interaction has not been verified by this build worker."]), ...review.issues.filter(issue => issue.startsWith("[follow-up]"))] } };
+      return { artifacts: metadata, validation: { build: true, unitTests: true, lint: true, runtimeVerified: Boolean(runtimeReport), visualVerified: Boolean(uiReport?.passed), limitations: [...(runtimeReport ? ["Native smoke interactions passed on the recorded Android emulator. Other devices and all failure paths are not covered."] : ["A complete native behavioral smoke suite has not been verified by this build worker."]), ...(uiReport ? [uiReport.scope] : ["Original/candidate screenshot comparison was not configured; visual quality is not verified."]), ...review.issues.filter(issue => issue.startsWith("[follow-up]"))] } };
     }
     await write(path.join(input.directory, "failure.json"), { issues });
     throw new WorkbenchError("build_failed", "The app did not pass implementation or build checks after four repairs. Your approved design is preserved; retry the build.", 422);

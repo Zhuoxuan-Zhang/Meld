@@ -12,6 +12,7 @@ Develop directly from this repository root; there is no nested `repo/` checkout.
 | `backend/` | Project API, saved state, jobs, research and Android builds |
 | `shared/` | Public contracts and reference/catalog normalization |
 | `pipeline/` | TypeScript APK analysis, model calls, design validation and revision storage |
+| [`minefield-plus-android/`](minefield-plus-android/README.md) | Standalone offline Minesweeper app with undo, pencil marks and durable saves |
 | `app_market/` | Independent Python market collector |
 | `docs/` | Design interaction, setup and API contracts |
 | `md/` | Original APK-analysis implementation specification |

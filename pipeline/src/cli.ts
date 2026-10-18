@@ -13,6 +13,7 @@ import { json, write, fileSha, exists, sha, files, redact, execLogged, stopOwned
 import { fingerprint, stage, report } from './state.js';
 import { checkApk } from './resources.js';
 import { validateRun, validateSpecData, validateEvidence } from './validate.js';
+import { prepareReferenceObservations } from './observation.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const toolRoot = path.resolve(process.env.MELD_PIPELINE_TOOL_ROOT || root);
@@ -130,6 +131,7 @@ async function execute() {
     });
     const apps = await json(path.join(run, 'apps.lock.json'));
     for (const a of apps) if (await fileSha(path.join(run, 'apps', a.id, 'input.apk')) !== a.sha256) throw new Error(`Input changed ${a.id}`);
+    await prepareReferenceObservations(toolRoot, run, apps.map((app: any) => ({ ...app, path: path.join(run, 'apps', app.id, 'input.apk') })), state.config);
     const specs: any[] = [];
     for (const app of apps) {
       app.path = path.join(run, 'apps', app.id, 'input.apk');

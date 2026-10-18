@@ -1,8 +1,34 @@
 import { test, expect } from "@playwright/test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import type { Middleware } from "../../backend/src/http";
 import { intentApi } from "../server/intent";
+
+test("the standalone backend serves the idea clarification routes used by the web app", async ({ request }) => {
+  const listener = createServer();
+  await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
+  const port = (listener.address() as AddressInfo).port;
+  await new Promise<void>(resolve => listener.close(() => resolve()));
+  const child = spawn(process.execPath, ["--import", fileURLToPath(new URL("../../pipeline/node_modules/tsx/dist/loader.mjs", import.meta.url)), fileURLToPath(new URL("../../backend/src/server.ts", import.meta.url))], {
+    env: { ...process.env, MELD_API_PORT: String(port) }, stdio: "ignore",
+  });
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    await expect.poll(async () => {
+      try { return (await request.get(base + "/api/intent/status", { timeout: 7000 })).status(); } catch { return 0; }
+    }, { timeout: 25000 }).toBe(200);
+    const invalid = await request.post(base + "/api/intent/clarify", { data: { idea: "a study timer" } });
+    expect(invalid.status()).toBe(400);
+    expect((await invalid.json()).error.message).toBe("Check your idea and answers, then retry.");
+    const crossOrigin = await request.post(base + "/api/intent/clarify", { data: { idea: "a study timer", domains: [], turns: [] }, headers: { Origin: "https://unrelated.example" } });
+    expect(crossOrigin.status()).toBe(403);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGTERM"); await exited; }
+  }
+});
 
 test("clarification validates inputs, grounds each round in answers, and rejects incomplete plans", async ({ request }) => {
   const calls: any[] = [];

@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
       intentApi(cache),
       workflowApi(env, process.cwd(), signals),
       marketApi({ ...marketOptionsFromEnv(env, process.cwd()), record: result => signals.record(result) }),
-      designApi({ root: path.join(cache, "designs"), signals, pipeline: { directory: path.join(cache, "pipeline-jobs"), apkDir: env.MELD_APK_DIR || path.join(cache, "apks"), toolRoot: env.MELD_PIPELINE_TOOL_ROOT, config: env.MELD_PIPELINE_CONFIG }, exampleId: env.MELD_DESIGN_EXAMPLE }),
+      designApi({ root: path.join(cache, "designs"), signals, pipeline: { directory: path.join(cache, "pipeline-jobs"), apkDir: env.MELD_APK_DIR || path.join(cache, "apks"), toolRoot: env.MELD_PIPELINE_TOOL_ROOT, config: env.MELD_PIPELINE_CONFIG, observationConfig: env.MELD_REA_OBSERVATION_CONFIG }, exampleId: env.MELD_DESIGN_EXAMPLE }),
       claudeApi(claude),
     ],
     server: { watch: { ignored: ["**/.meld-cache/**", "**/test-results/**", "**/playwright-report/**"] } },

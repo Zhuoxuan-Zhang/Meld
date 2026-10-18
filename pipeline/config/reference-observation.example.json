@@ -1,0 +1,58 @@
+{
+  "serial": "emulator-5580",
+  "install": true,
+  "vision": {
+    "provider": "claude_cli",
+    "model": "claude-sonnet-5",
+    "reasoningEffort": "medium"
+  },
+  "packages": {
+    "dev.lucanlm.antimine": {
+      "scenarios": [
+        {
+          "id": "game",
+          "goal": "Play the primary Minesweeper board with clear status and input controls",
+          "steps": [
+            {
+              "action": "tap",
+              "selector": {
+                "textAnyOf": [
+                  "START",
+                  "CONTINUE"
+                ]
+              }
+            },
+            {
+              "action": "tap",
+              "selector": {
+                "text": "Close"
+              },
+              "ifPresent": true
+            },
+            {
+              "action": "tap",
+              "selector": {
+                "text": "TAP TO BEGIN"
+              },
+              "ifPresent": true
+            }
+          ],
+          "allowVisualOnly": true
+        },
+        {
+          "id": "settings",
+          "goal": "Adjust Minesweeper appearance and interaction preferences",
+          "steps": [
+            {
+              "action": "tap",
+              "selector": {
+                "text": "SETTINGS"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "captureLaunchScreen": true
+}

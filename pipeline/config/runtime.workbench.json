@@ -3,7 +3,7 @@
   "model": "claude-sonnet-5",
   "reasoning_effort": "low",
   "max_calls": 80,
-  "max_output_tokens": 16000,
+  "max_output_tokens": 24000,
   "model_timeout_ms": 300000,
   "pricing": { "source": "Claude Code CLI subscription; subscription usage is not API dollar pricing" }
 }

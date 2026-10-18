@@ -11,6 +11,7 @@ import { DesignPatch, applyDesignPatch } from './design-patch.js';
 import { DesignReferenceRepair, applyDesignReferenceRepair } from './design-repair.js';
 import { designErrors } from './workbench/validation.js';
 import { zodTextFormat } from 'openai/helpers/zod';
+import { loadReferenceObservations } from './observation.js';
 const DesignCore=UnifiedDesign.omit({pages:true,visual:true,compose:true});
 const DesignPages=UnifiedDesign.pick({pages:true});
 const DesignContracts=UnifiedDesign.pick({visual:true,compose:true});
@@ -108,6 +109,11 @@ async function codexDesign(run:string,state:any,model:Claude,base:any,comparison
   throw new Error('Design remains draft after two targeted repairs');
 }
 export async function synthesize(run: string, state: any, claude: Claude, brief: any, specs: any[]) {
+  const observations = await loadReferenceObservations(run);
+  if (observations.length) {
+    brief.market_signals = { ...brief.market_signals, reference_observations: observations };
+    await write(path.join(run, 'brief.json'), brief);
+  }
   const base = { brief, specs };
   const dir = path.join(run, 'synthesis');
   let comparison: any, decisions: any;

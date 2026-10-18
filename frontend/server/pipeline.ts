@@ -25,7 +25,7 @@ export type PipelineJob = { id: string; design_id: string; input: DesignInputVal
   created_at: string; updated_at: string; reference_apps: { appId: string; title: string; rank: number }[];
   missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
 export type PipelineRunner = (request: { run: string; brief: string; market: string; config: string; apks: string[]; pauseForDecisions?: boolean }) => Promise<number | null>;
-export type PipelineOptions = { directory: string; apkDir?: string; toolRoot?: string; config?: string; runner?: PipelineRunner; pauseForDecisions?: boolean };
+export type PipelineOptions = { directory: string; apkDir?: string; toolRoot?: string; config?: string; observationConfig?: string; runner?: PipelineRunner; pauseForDecisions?: boolean };
 
 export function scopedCoreTasks(input: DesignInputValue) {
   const ids = new Set([...input.requested_features, ...input.preferences.flatMap(p => p.feature_ids)]);
@@ -61,7 +61,7 @@ export async function renderSelectionScope(input: DesignInputValue, apps: Market
   return scope;
 }
 
-export function processPipelineRunner(toolRoot?: string): PipelineRunner {
+export function processPipelineRunner(toolRoot?: string, observationConfig?: string): PipelineRunner {
   return async input => {
     const output = path.join(path.dirname(input.run), "execution.log");
     const handle = await fs.open(output, "a");
@@ -70,7 +70,7 @@ export function processPipelineRunner(toolRoot?: string): PipelineRunner {
     try {
       return await new Promise<number | null>((resolve, reject) => {
         const child = spawn(process.execPath, ["--import", "tsx", "src/cli.ts", ...command], {
-          cwd: pipelineRoot, env: { ...process.env, ...(!process.env.JAVA_HOME && existsSync("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java") ? { JAVA_HOME: "/Applications/Android Studio.app/Contents/jbr/Contents/Home" } : {}), ...(toolRoot ? { MELD_PIPELINE_TOOL_ROOT: toolRoot } : {}) }, stdio: ["ignore", handle.fd, handle.fd],
+          cwd: pipelineRoot, env: { ...process.env, ...(!process.env.JAVA_HOME && existsSync("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java") ? { JAVA_HOME: "/Applications/Android Studio.app/Contents/jbr/Contents/Home" } : {}), ...(toolRoot ? { MELD_PIPELINE_TOOL_ROOT: toolRoot } : {}), ...(observationConfig ? { MELD_REA_OBSERVATION_CONFIG: observationConfig } : {}) }, stdio: ["ignore", handle.fd, handle.fd],
         });
         // A server shutdown stops the owned pipeline, not unrelated processes.
         const stop = () => child.kill("SIGTERM");
@@ -200,7 +200,7 @@ export class PipelineJobs {
       await write(briefFile, brief); const config = this.options.config || path.join(pipelineRoot, "config/runtime.pipeline.json");
       job.phase = "Analyzing reference apps and combining the design…"; await write(this.file(job.id), job);
       // An interrupted run resumes in-place with the engine's fingerprint checks.
-      const runner = this.options.runner || processPipelineRunner(this.options.toolRoot);
+      const runner = this.options.runner || processPipelineRunner(this.options.toolRoot, this.options.observationConfig);
       job.cli_exit_code = await runner({ run, apks, brief: path.join(directory, "brief.json"), market: path.join(directory, "market.json"), config, pauseForDecisions: this.options.pauseForDecisions });
       if (!(await exists(path.join(run, "final/final-design.json"))) && await exists(path.join(run, "synthesis/comparison.json")) && this.options.pauseForDecisions) {
         const state = await json(path.join(run, "run.json"));

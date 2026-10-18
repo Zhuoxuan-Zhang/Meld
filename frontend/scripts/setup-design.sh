@@ -25,7 +25,9 @@ fi
 workflow_patch="$PWD/frontend/patches/meld-workflow.patch"
 # Meld's frontend is synced separately. Backend setup must not replay the
 # upstream UI/test hunks over the current studio or its Playwright settings.
-if ! git -C "$backend_dir" apply '--exclude=frontend/*' --reverse --check "$workflow_patch" 2>/dev/null; then
+# This repository already includes the backend changes; only a separate pinned
+# checkout needs the compatibility patch, which local edits can invalidate.
+if [ "$backend_dir" != "$PWD" ] && ! git -C "$backend_dir" apply '--exclude=frontend/*' --reverse --check "$workflow_patch" 2>/dev/null; then
   git -C "$backend_dir" apply '--exclude=frontend/*' --check "$workflow_patch"
   git -C "$backend_dir" apply '--exclude=frontend/*' "$workflow_patch"
 fi

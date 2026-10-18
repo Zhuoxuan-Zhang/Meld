@@ -1,0 +1,61 @@
+{
+  "project_name": "Minefield Plus",
+  "target_users": "People who want a classic offline Minesweeper experience with a couple of quality-of-life touches borrowed from other logic games",
+  "core_tasks": [
+    "reveal",
+    "flag",
+    "undo",
+    "annotate",
+    "restart",
+    "resume"
+  ],
+  "required_states": [
+    "normal",
+    "error",
+    "delete_confirmation",
+    "unsaved_changes"
+  ],
+  "max_features": 5,
+  "max_navigation": 3,
+  "offline_only": true,
+  "implementation": "Android Kotlin / Jetpack Compose; a pure Kotlin Minesweeper game engine with testable deterministic mine placement and local persisted state",
+  "excluded": [
+    "accounts",
+    "cloud sync",
+    "online leaderboards",
+    "ads",
+    "payments",
+    "AI players",
+    "automatic solvers",
+    "2048 tile game as a separate mode",
+    "Sudoku puzzle as a separate mode",
+    "custom board import/export",
+    "advanced no-guessing Minesweeper generation",
+    "Killer Sudoku",
+    "12x12 Sudoku",
+    "2048 automatic replay"
+  ],
+  "scope": "A single offline Minesweeper app as the complete product, based primarily on the user-selected Antimine APK reference: classic 9x9 board with 10 mines, a safe first revealed cell, tap reveal with flood reveal of connected empty cells, flag placement (long-press or an accessible flag-mode toggle), a live mine counter and elapsed timer, and clear win/loss presentation. Preserve Minesweeper's own rules and identity as the base app; the other two references contribute only two specific borrowed interaction patterns, not their own game modes: a one-step undo of the last reveal/flag action adapted from the 2048 reference's undo/history mechanism, and numbered pencil-mark annotations a player can place on an unrevealed cell to track a suspected mine count, adapted from the Sudoku reference's candidate/pencil-mark mechanic (not Sudoku candidate digits). Main navigation Game, Statistics, Settings; the board is the primary page. Support new game, pause, confirmed restart, a saved in-progress board that survives process restarts, shared light/dark theme, accessible touch controls, and local statistics (games played, win rate, best time). Concrete rules and recovery should be precise but avoid hypothetical distributed-storage concurrency requirements; single-user local app. Colors, typography, spacing, board geometry, focus and Back behavior must be specified. Do not reintroduce 2048 tile movement/merging or Sudoku number entry/puzzle generation as app features; only the undo and pencil-mark interaction patterns are borrowed, and both must appear in the final design integrated into the Minesweeper board, not as separate screens or modes.",
+  "reference_scopes": {
+    "dev.lucanlm.antimine": {
+      "core_tasks": [
+        "reveal",
+        "flag",
+        "restart"
+      ],
+      "scope": "This is the base app whose primary purpose and domain rules the proposed app preserves. Analyze Minesweeper cell reveal, mine/neighbor counting, flood reveal, flag input and restart as the app's core loop and primary identity. Timers, statistics, themes and lifecycle recovery may be examined but missing evidence remains an explicit scoped omission; no claim of full-app coverage or runtime verification."
+    },
+    "org.andstatus.game2048": {
+      "core_tasks": [
+        "undo"
+      ],
+      "scope": "Analyze only this reference's undo/history mechanism as a single feature to adapt into the Minesweeper base app (one-step undo of the last reveal/flag action). This reference's own movement, merge/spawn logic, tile scoring and any other 2048-specific mechanic are out of scope and must not appear in the proposed app; it contributes no game mode of its own."
+    },
+    "com.kaajjo.libresudoku": {
+      "core_tasks": [
+        "pencil_marks"
+      ],
+      "scope": "Analyze only this reference's candidate/pencil-mark annotation mechanism as a single feature to adapt into the Minesweeper base app (numbered marks a player places on an unrevealed cell to track a suspected mine count, not Sudoku candidate digits). This reference's own number entry, immutable givens, puzzle generation and rule checking are out of scope and must not appear in the proposed app; it contributes no game mode of its own."
+    }
+  }
+}

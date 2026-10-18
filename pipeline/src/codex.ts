@@ -21,13 +21,18 @@ export function isCodexOutputLimitError(line: string): boolean {
 // Fresh ephemeral context; REA remains in the serial orchestrator.
 export async function executeCodex(dir: string, request: any, timeout: number, signal?: AbortSignal) {
   signal?.throwIfAborted();
+  const images = z.array(z.string().min(1)).max(12).parse(request.images || []);
+  for (const image of images) {
+    const stat = await fs.stat(image);
+    if (!path.isAbsolute(image) || !stat.isFile() || stat.size > 12 * 1024 * 1024) throw new Error('Invalid visual evidence image');
+  }
   await write(path.join(dir, 'schema.json'), request.schema);
   await write(path.join(dir, 'prompt.txt'), request.prompt);
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'apk-design-codex-'));
   const args = ['exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--model', request.model,
     '-c', `model_reasoning_effort="${request.reasoning_effort}"`, '-c', 'approval_policy="never"', '-c', 'web_search="disabled"',
     '--disable', 'shell_tool', '--disable', 'unified_exec', '--disable', 'apps', '--disable', 'computer_use', '--disable', 'browser_use', '--disable', 'unbounded_connection_retries',
-    '--json', '--output-schema', path.join(dir, 'schema.json'), '--output-last-message', path.join(dir, 'answer.json'), '-'];
+    '--json', '--output-schema', path.join(dir, 'schema.json'), '--output-last-message', path.join(dir, 'answer.json'), ...images.flatMap(image => ['--image', image]), '-'];
   const env: Record<string, string> = {};
   for (const [key,value] of Object.entries(process.env)) if (value && !['OPENAI_API_KEY','ANTHROPIC_API_KEY','CODEX_API_KEY'].includes(key)) env[key] = value;
   const start = Date.now();

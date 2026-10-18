@@ -1,0 +1,39 @@
+{
+  "requireMatch": false,
+  "projects": {},
+  "bases": {
+    "dev.lucanlm.antimine": {
+      "referenceDirectory": "../outputs/rea-ui-integration/reference-live",
+      "serial": "emulator-5580",
+      "vision": {
+        "provider": "claude_cli",
+        "model": "claude-sonnet-5",
+        "reasoningEffort": "medium"
+      },
+      "scenarios": [
+        {
+          "id": "game",
+          "goal": "Play the primary Minesweeper board with clear status and input controls",
+          "steps": [],
+          "expectedText": [
+            "Reveal",
+            "Flag",
+            "Pencil"
+          ]
+        },
+        {
+          "id": "settings",
+          "goal": "Adjust Minesweeper appearance and interaction preferences",
+          "steps": [
+            {
+              "action": "tap",
+              "selector": {
+                "text": "Settings"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

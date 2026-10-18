@@ -5,6 +5,7 @@ import type { Feature, ReferenceApp } from "./data";
 // One ranked app from the local market-signal scanner (third_parties/new_app_agent),
 // normalized by the local server. Values are public Google Play snapshots.
 export type MarketApp = {
+  provenance?: "curated_apk";
   appId: string;
   rank: number;
   title: string;
@@ -164,7 +165,7 @@ function marketApp(v: unknown): MarketApp {
     rank < 1 ||
     typeof score !== "number" ||
     !Number.isInteger(score) ||
-    score < 1 ||
+    (score < 1 && !(v.provenance === "curated_apk" && score === 0)) ||
     score > 15
   )
     throw new Error("Invalid market app");
@@ -209,6 +210,7 @@ function marketApp(v: unknown): MarketApp {
       ? { listedFeatures: parseListedFeatures(v.listedFeatures) }
       : {}),
     ...(v.retained === true ? { retained: true } : {}),
+    ...(v.provenance === "curated_apk" ? { provenance: "curated_apk" as const } : {}),
   };
 }
 

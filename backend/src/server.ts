@@ -9,6 +9,7 @@ import { claudeApi, claudeOptionsFromEnv } from "./adapters/claude";
 import { suggestionsApi } from "./adapters/suggestions";
 import { designApi } from "./adapters/design";
 import { send } from "./http";
+import { intentApi } from "../../frontend/server/intent";
 import { stopOwnedProcesses } from "../../pipeline/dist/src/integration.js";
 import type { Middleware } from "./http";
 
@@ -17,6 +18,7 @@ if (existsSync(path.join(frontendDir, ".env.local"))) process.loadEnvFile(path.j
 const env = process.env, options = projectOptionsFromEnv(env, frontendDir), service = new ProjectService(options);
 const middleware: Middleware[] = [projectsMiddleware(service, defaultAvailability(env, frontendDir))];
 const host = { middlewares: { use(handler: Middleware) { middleware.push(handler); } } };
+intentApi(path.join(frontendDir, ".meld-cache")).configureServer(host);
 marketApi({ ...marketOptionsFromEnv(env, frontendDir), onResult: result => options.signals.record(result) }).configureServer(host);
 claudeApi(claudeOptionsFromEnv(env, frontendDir)).configureServer(host);
 suggestionsApi(Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"))).configureServer(host);

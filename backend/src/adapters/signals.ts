@@ -9,7 +9,7 @@ export class SignalsStore {
   async record(input: MarketResult): Promise<MarketResult> {
     const { scanId: _scanId, ...result } = parseMarketResult(input);
     const apps = result.apps.filter(app => !app.retained);
-    if (apps.length > 5) throw new Error("A scanner report may contain at most five apps");
+    if (apps.length > 200) throw new Error("A scanner report may contain at most 200 apps");
     const snapshot = { ...result, apps };
     const scanId = `scan-${semanticHash(snapshot)}`;
     const file = path.join(this.directory, `${scanId}.json`);

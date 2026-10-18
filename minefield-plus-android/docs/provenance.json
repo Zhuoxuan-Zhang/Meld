@@ -1,0 +1,32 @@
+{
+  "input_run": "2026-10-16T22-29-31-419Z-96344b",
+  "implementation_authorship": "Direct Codex implementation; not Claude pipeline-generated code",
+  "pipeline_resume": {
+    "attempted": true,
+    "succeeded": false,
+    "reason": "Saved fingerprint does not match current configuration/prompts/tool versions"
+  },
+  "draft_structural_check": {
+    "function": "pipeline/dist/src/workbench/validation.js designErrors",
+    "errors": [],
+    "independent_model_review": false
+  },
+  "inputs": [
+    {
+      "path": "pipeline/runs/2026-10-16T22-29-31-419Z-96344b/brief.json",
+      "sha256": "970a9a5a207810c814047d07a8d052fe6ffae7cd4dea9259ee1d4438b1bb1378"
+    },
+    {
+      "path": "pipeline/runs/2026-10-16T22-29-31-419Z-96344b/synthesis/design-draft-1792190960620.json",
+      "sha256": "df34c3413558fa514cdd010c637d82d7dde340cdabb8f3bdc9b53ee4c8b7e1ce"
+    },
+    {
+      "path": "pipeline/runs/2026-10-16T22-29-31-419Z-96344b/synthesis/comparison.json",
+      "sha256": "d4f07c1ff8fd8a7a86a8c5342c860346ceb4d4847026743b9d70fefcf8b6a8ec"
+    },
+    {
+      "path": "pipeline/runs/2026-10-16T22-29-31-419Z-96344b/synthesis/decisions.json",
+      "sha256": "1031dbadecde7cd5a38f767c463d98d5a87a5a202bbfc304e86728d373dbb32a"
+    }
+  ]
+}

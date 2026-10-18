@@ -146,7 +146,7 @@ export async function analyze(root: string, run: string, app: any, rea: Rea, cla
   for (let round = 0; round < 3; round++) {
     review = await claude.ask(`${app.id}-review-${round}`, await claude.prompt('review'), { kind: 'app-spec', spec, evidence: context, brief, scoped_completion_criteria:sourceCompletion }, Review);
     await write(path.join(attempts, `review-${round}.json`), review);
-    if (review.passed && !review.issues.some((x: any) => x.severity === 'blocking')) break;
+    if (review.passed && !review.issues.some((x: any) => x.severity === 'blocking')) { spec.status = 'complete'; break; }
     if (round === 2) { spec.status = 'partial'; break; }
     const supplementPlan = await claude.ask(`${app.id}-supplement-${round}`, prompt, { mode: 'plan', app: { id: app.id, package_name: app.package_name, version: app.version, sha256: app.sha256 }, brief, prior_spec: spec, review, evidence: context, tool_schemas: toolSchemas, instruction: 'Request only targeted missing evidence for blocking review issues. Read remaining saved method windows before declaring their behavior unsupported. Use real inventoried selectors; at most twelve actions.' }, Plan);
     await write(path.join(attempts, `supplement-plan-${round}.json`), supplementPlan);

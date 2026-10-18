@@ -8,7 +8,7 @@ export const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"
 const mdText = (value: string) => value.replace(/[<>]/g, c => c === '<' ? '&lt;' : '&gt;').replace(/[\\`*_{}\[\]()#+.!|]/g, '\\$&');
 export const refAnchor = (ref: RefT) => `${ref.kind}-${ref.id}`;
 export const developerLink = (ref: RefT) => `developer.html#${encodeURIComponent(refAnchor(ref))}`;
-const screenshotNames: Record<string, string> = { 'page-collection': 'collection.png', 'page-search': 'search.png', 'page-editor': 'editor.png', 'page-labels': 'labels.png' };
+const screenshotNames: Record<string, string> = { 'page-collection': 'collection.png', 'page-search': 'search.png', 'page-editor': 'editor.png', 'page-labels': 'labels.png', 'page-game': 'game.png', 'page-stats': 'stats.png', 'page-settings': 'settings.png' };
 export const screenshotFor = (id: string) => screenshotNames[id] || null;
 
 export async function renderDocuments(dir: string, doc: UserDocumentT, data: RevisionDataT, version: number, implemented: boolean) {

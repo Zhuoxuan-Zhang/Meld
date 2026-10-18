@@ -155,6 +155,13 @@ export async function validateRun(run: string) {
     catch (e) { errors.push(`Missing or unreadable artifact ${relative}: ${String(e)}`); return null; }
   };
   const apps = await load('apps.lock.json') || [];
+  if (await exists(path.join(run, 'reference-observations.json'))) {
+    try {
+      const { loadReferenceObservations } = await import('./observation.js');
+      const observations = await loadReferenceObservations(run);
+      for (const observation of observations) if (!apps.some((app: any) => app.package_name === observation.packageName && app.sha256 === observation.apkSha256)) errors.push(`Reference observation APK identity mismatch ${observation.packageName}`);
+    } catch (error) { errors.push(`Reference observation validation failed: ${String(error)}`); }
+  }
   if (apps.length < 1 || apps.length > 5) errors.push('One to five locked APK inputs are required');
   for (const app of apps) {
     try { if (await fileSha(path.join(run, 'apps', app.id, 'input.apk')) !== app.sha256) errors.push(`Input changed ${app.id}`); }

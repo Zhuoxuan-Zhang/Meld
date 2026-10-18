@@ -4,6 +4,7 @@ import type { Feature, ReferenceApp } from "./catalog";
 // One ranked app from the local market-signal scanner (third_parties/new_app_agent),
 // normalized by the local server. Values are public Google Play snapshots.
 export type MarketApp = {
+  provenance?: "curated_apk";
   appId: string;
   rank: number;
   title: string;
@@ -63,6 +64,12 @@ export type MarketResult = {
 // sent as a plain Google Play search topic.
 export const domainScans: Record<string, { genreId: string; queries: string[] }> =
   {
+    "Notes & lists": { genreId: "PRODUCTIVITY", queries: ["offline notepad", "simple checklist", "plain text notes"] },
+    "Focus & habits": { genreId: "PRODUCTIVITY", queries: ["pomodoro timer", "offline habit tracker", "simple focus timer"] },
+    "Journals & diaries": { genreId: "LIFESTYLE", queries: ["offline diary", "private journal", "simple diary"] },
+    Flashcards: { genreId: "EDUCATION", queries: ["offline flashcards", "make your own flashcards", "simple flashcards"] },
+    "Reading lists": { genreId: "BOOKS_AND_REFERENCE", queries: ["offline book tracker", "reading list", "reading log"] },
+    "Counters & tallies": { genreId: "TOOLS", queries: ["simple tally counter", "offline counter", "multi counter"] },
     Productivity: {
       genreId: "PRODUCTIVITY",
       queries: ["to do list", "notes", "focus timer"],
@@ -88,7 +95,7 @@ export const domainScans: Record<string, { genreId: string; queries: string[] }>
       queries: ["drawing", "graphic design", "mood board"],
     },
   };
-export function scanPlan(domain: string) {
+export function scanPlan(domain: string): { category: string; genreId: string | null; queries: string[] } {
   const known = domainScans[domain];
   return {
     category: domain,
@@ -157,7 +164,7 @@ function marketApp(v: unknown): MarketApp {
     rank < 1 ||
     typeof score !== "number" ||
     !Number.isInteger(score) ||
-    score < 1 ||
+    (score < 1 && !(v.provenance === "curated_apk" && score === 0)) ||
     score > 15
   )
     throw new Error("Invalid market app");
@@ -202,12 +209,13 @@ function marketApp(v: unknown): MarketApp {
       ? { listedFeatures: parseListedFeatures(v.listedFeatures) }
       : {}),
     ...(v.retained === true ? { retained: true } : {}),
+    ...(v.provenance === "curated_apk" ? { provenance: "curated_apk" as const } : {}),
   };
 }
 
 // Validates a normalized result, both from the local API and from saved workspaces.
 export function parseMarketResult(v: unknown): MarketResult {
-  if (!isRecord(v) || !Array.isArray(v.apps) || v.apps.length > 20)
+  if (!isRecord(v) || !Array.isArray(v.apps) || v.apps.length > 240)
     throw new Error("Invalid market result");
   const domain = text(v.domain, 48);
   const status = statuses.find((s) => s === v.status);
@@ -260,7 +268,7 @@ export function fromScannerReport(
     domain,
     category: report.category,
     genreId: report.genre_id,
-    queries: plan.queries,
+    queries: isRecord(collection.query_result_counts) ? Object.keys(collection.query_result_counts) : plan.queries,
     country: report.country,
     language: report.language,
     status: report.status,
@@ -270,7 +278,7 @@ export function fromScannerReport(
     ranked: collection.apps_ranked,
     failedRequests: collection.failed_requests,
     windowDays: window.days,
-    apps: report.top_five.map((a) => {
+    apps: (Array.isArray(report.ranking) ? report.ranking : report.top_five).slice(0, 200).map((a) => {
       if (!isRecord(a)) throw new Error("Unexpected scanner app");
       return {
         appId: a.app_id,

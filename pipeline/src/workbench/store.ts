@@ -35,7 +35,7 @@ export type RevisionRecord = {
   id: string; version: number; parent_revision: string | null; created_at: string;
   kind: 'import' | 'change' | 'restore'; change_id: string | null; selected_change_ids: string[];
   data_hash: string; semantic_hash: string; files: Record<string, string>; changed_features: string[];
-  authorship: { actor: 'imported_llm' | 'user'; request: string; scope: string };
+  authorship: { actor: 'imported_llm' | 'imported_app' | 'user'; request: string; scope: string };
 };
 export type Manifest = {
   id: string; current_revision: string; revisions: RevisionRecord[];

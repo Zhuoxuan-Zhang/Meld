@@ -20,3 +20,6 @@ outputs/
 /demo-video/
 test-results/
 playwright-report/
+
+# Shared device observation locks.
+/pipeline/.locks/

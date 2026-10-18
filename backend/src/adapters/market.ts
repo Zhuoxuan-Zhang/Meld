@@ -58,7 +58,7 @@ export function marketOptionsFromEnv(
     cacheHours: number(env.MELD_MARKET_CACHE_HOURS, 24),
     maxCandidates: Math.min(
       200,
-      Math.max(5, Math.round(number(env.MELD_MARKET_CANDIDATES, 30))),
+      Math.max(5, Math.round(number(env.MELD_MARKET_CANDIDATES, 90))),
     ),
   };
 }
@@ -130,8 +130,8 @@ export function createMarketService(options: MarketOptions) {
   const runner = options.runner || processRunner(options.python, options.scannerDir);
   const probe = options.probe || processProbe(options.python, options.scannerDir);
   const cacheMs = (options.cacheHours ?? 24) * 3_600_000;
-  const maxCandidates = options.maxCandidates ?? 30;
-  const timeoutMs = options.timeoutMs ?? 150_000;
+  const maxCandidates = options.maxCandidates ?? 90;
+  const timeoutMs = options.timeoutMs ?? 240_000;
   const memory = new Map<string, MarketResult>();
   // A positive probe is kept; a negative one is retried so a later
   // `npm run setup:market` is picked up without restarting Meld.
@@ -193,14 +193,18 @@ export function createMarketService(options: MarketOptions) {
       const result = fresh(
         fromScannerReport(saved.domain, saved.report),
       );
+      if (result && Array.isArray(saved.queries)) result.queries = saved.queries;
       if (result) memory.set(key, result);
       return result;
     } catch {
       return undefined;
     }
   };
-  async function scan(domain: string, refresh: boolean, signal: AbortSignal) {
+  async function scan(domain: string, refresh: boolean, signal: AbortSignal, queries?: string[]) {
     const plan = scanPlan(domain);
+    // Feature queries may span store categories; avoid excluding useful apps
+    // solely because their publisher chose a different Play category.
+    if (queries) { plan.queries = [...new Set(queries.map(q => q.trim()))]; plan.genreId = null; }
     // `--name=value` keeps a value such as "-x" or "--help" from being read as an option.
     const args = [
       `--category=${plan.category}`,
@@ -209,7 +213,7 @@ export function createMarketService(options: MarketOptions) {
       `--max-candidates=${maxCandidates}`,
     ];
     // v3: reports carry store descriptions and image links.
-    const key = JSON.stringify(["v3", domain, args]);
+    const key = JSON.stringify(["v4-full-ranking", domain, args]);
     if (!refresh) {
       const hit = await cached(key);
       if (hit) return { result: hit, cached: true };
@@ -248,6 +252,7 @@ export function createMarketService(options: MarketOptions) {
     let result: MarketResult;
     try {
       result = fromScannerReport(domain, outcome.report);
+      if (plan.queries.length) result.queries = plan.queries;
     } catch {
       throw new ScanError(502, "The market scanner returned an unexpected report.");
     }
@@ -256,7 +261,7 @@ export function createMarketService(options: MarketOptions) {
     if (file)
       await mkdir(path.dirname(file), { recursive: true })
         .then(() =>
-          writeFile(file, JSON.stringify({ domain, report: outcome.report })),
+          writeFile(file, JSON.stringify({ domain, report: outcome.report, queries: result.queries })),
         )
         .catch(() => {
           /* The cache is an optimization; a failed write keeps the result. */
@@ -301,7 +306,7 @@ export function marketApi(options: MarketOptions): Plugin {
       return send(res, 403, { error: "Use Meld from its local browser address." });
     if (!req.headers["content-type"]?.startsWith("application/json"))
       return send(res, 415, { error: "Send a JSON request." });
-    let input: { domain?: unknown; refresh?: unknown };
+    let input: { domain?: unknown; refresh?: unknown; queries?: unknown };
     try {
       let body = "";
       for await (const chunk of req) {
@@ -321,6 +326,7 @@ export function marketApi(options: MarketOptions): Plugin {
       (input.refresh !== undefined && typeof input.refresh !== "boolean")
     )
       return send(res, 400, { error: "Send one domain of up to 48 characters." });
+    if (input.queries !== undefined && (!Array.isArray(input.queries) || !input.queries.length || input.queries.length > 4 || input.queries.some(q => typeof q !== "string" || !q.trim() || q.length > 120))) return send(res, 400, { error: "Use one to four search phrases of up to 120 characters." });
     const domain = canonicalDomain(input.domain);
     if (res.destroyed) return;
     const controller = new AbortController();
@@ -329,7 +335,7 @@ export function marketApi(options: MarketOptions): Plugin {
     };
     res.on("close", onClose);
     try {
-      const output = await scan(domain, input.refresh === true, controller.signal);
+      const output = await scan(domain, input.refresh === true, controller.signal, input.queries as string[] | undefined);
       controller.signal.throwIfAborted();
       send(res, 200, { ...output, result: options.onResult ? await options.onResult(output.result) : output.result });
     } catch (error) {
