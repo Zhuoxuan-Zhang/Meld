@@ -9,6 +9,20 @@ import type { BuildRunner } from "./projects";
 import { uiValidationEntry, uiReferenceContext, validateBuiltUi } from "./ui-validation";
 import type { Project } from "../../shared/contracts";
 
+export function hasForbiddenSourceOperation(source: string): boolean {
+  let inspected = source;
+  // A Runtime instance may be used solely for heap statistics. Require a plain
+  // immutable assignment and account for every reference before accepting it.
+  const declarations = [...source.matchAll(/\bval[ \t]+([A-Za-z_]\w*)[ \t]*=[ \t]*(?:java\.lang\.)?Runtime\s*\.\s*getRuntime\s*\(\s*\)[ \t]*(?=;|\r?\n|$)/g)];
+  for (const declaration of declarations) {
+    const name = declaration[1];
+    const candidate = inspected.replace(declaration[0], '').replace(new RegExp(`\\b${name}\\s*\\.\\s*(?:maxMemory|totalMemory|freeMemory)\\s*\\(\\s*\\)`, 'g'), '0L');
+    if (!new RegExp(`\\b${name}\\b`).test(candidate)) inspected = candidate;
+  }
+  inspected = inspected.replace(/\b(?:java\.lang\.)?Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*(?:maxMemory|totalMemory|freeMemory)\s*\(\s*\)/g, '0L');
+  return /ProcessBuilder|Runtime\s*\.\s*getRuntime|java\.net\.|System\s*\.\s*exit/.test(inspected);
+}
+
 export type AndroidEnvironment = { sdk: string; javaHome: string; templateDirectory: string; uiValidationConfig?: string; nativeSmoke?: { projectId: string; script: string; adb: string; serial: string; output: string } };
 const Files = SourceFiles;
 const productRequirements = " When approvedOutline is supplied, it is the user's authoritative product scope. Preserve every explicit operation in its feature steps, even if the detailed design compresses it into a word such as manage. Adding, editing, checking and deleting are separate operations. A missing requested operation is blocking. Trace each required control through the actual navigation host, state owner and persistence layer; no-op callback defaults do not implement a feature. When a shared signature changes, update every caller and entry-point connection. Ensure a new workflow can start without accidentally editing the previous completed record. Use one vertical scrolling owner or explicitly bound nested scrolling containers; never put an unbounded LazyColumn inside a verticalScroll Column. Every saved list row must remain reachable through scrolling. If a lazy list is replaced by a plain Column, remove stale height caps that truncate its rows. Keep form fields and Save/Cancel controls reachable with the keyboard open and in landscape. For modal forms, apply keyboard avoidance at the dialog or editor root, not only the AlertDialog text slot while its title and buttons remain under the keyboard. When height is short, the entire form including heading and actions must remain reachable through scrolling or a compact full-screen editor; do not reserve a fixed heading/footer that leaves zero height for input. Programmatic focus must target an attached control in its actual dialog composition; do not request focus from an outer effect before dialog content mounts. Optional autofocus must never crash or clear input during rotation. ";
@@ -132,13 +146,17 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
           await write(path.join(input.directory, "retry-source.json"), { previousBuildId: previousId, revision: input.revision, designHash: input.designHash });
           break;
         }
-        if (await exists(failure) && await exists(modelDirectory)) {
+        if (await exists(modelDirectory)) {
           const combined = (await fs.readdir(modelDirectory)).filter(name => /^implementation-\d+\.json$/.test(name)).sort((a, b) => Number(b.match(/\d+/)![0]) - Number(a.match(/\d+/)![0]));
           if (combined.length) {
             prior = Files.parse(JSON.parse(await fs.readFile(path.join(modelDirectory, combined[0]), "utf8")));
-            issues = z.array(z.string()).parse(JSON.parse(await fs.readFile(failure, "utf8")).issues);
+            const failureData = await exists(failure) ? await json(failure) : { issues: [] };
+            issues = z.array(z.string()).parse(failureData.issues);
+            if (!(await exists(failure))) {
+              checkedSource = true;
+              await write(path.join(input.directory, "generated-source-recovery.json"), { previousBuildId: previousId, sourceSha256: sha(JSON.stringify(Files.parse(prior).files)), reason: "Resume the complete generated snapshot after a source-gate interruption. Source validation, compilation, review and configured runtime gates still run." });
+            }
             const savedRound = Number(combined[0].match(/\d+/)![0]);
-            const failureData = await json(failure);
             const runtimeFindings = ["native", "visual"].includes(failureData.stage) || Boolean(failureData.uiReview) || issues.some(issue => /Actual Android UI checks failed|Native harness|screenshot review/i.test(issue));
             const checkedLog = path.join(previousDirectory, `gradle-${savedRound}.log`);
             if (!runtimeFindings && await exists(checkedLog) && /^BUILD SUCCESSFUL in /m.test(await fs.readFile(checkedLog, "utf8")) && !(await exists(path.join(previousDirectory, `review-${savedRound}.json`)))) {
@@ -168,7 +186,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
             const parsed = path.join(modelDirectory, attempt, "parsed.json");
             if (!(await exists(parsed))) continue;
             prior = Files.parse(JSON.parse(await fs.readFile(parsed, "utf8")));
-            issues = z.array(z.string()).parse(JSON.parse(await fs.readFile(failure, "utf8")).issues);
+            issues = await exists(failure) ? z.array(z.string()).parse((await json(failure)).issues) : [];
             await write(path.join(input.directory, "retry-source.json"), { previousBuildId: previousId, revision: input.revision, designHash: input.designHash });
             break;
           }
@@ -214,7 +232,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
     }
     const approvedOutline = approvedOutlineForBuild(input.project, input.revision);
     const rebuildOnly = Boolean(prior && (checkedSource && !issues.length || issues.length && issues.every(isHarnessFailure)));
-    if (rebuildOnly) await write(path.join(input.directory, "harness-retry.json"), { previousBuildId: input.project.latestBuild?.id, reason: checkedSource && !issues.length ? "Recheck the exact previously compiled source for this approved revision and current platform configuration." : "Rebuild the unchanged accepted source after a native harness error; do not repair application code for test-script exceptions." });
+    if (rebuildOnly) await write(path.join(input.directory, "harness-retry.json"), { previousBuildId: input.project.latestBuild?.id, reason: checkedSource && !issues.length ? "Recheck the recovered source for this approved revision and current platform configuration; compilation and review are still required." : "Rebuild the unchanged accepted source after a native harness error; do not repair application code for test-script exceptions." });
     let runtimeReport: any = null;
     for (let round = 0; round < 5; round++) {
       await input.progress(round ? "Correcting app implementation checks…" : "Implementing your approved app design…");
@@ -224,7 +242,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
       const mainFile = output.files.find(f => f.path === "app/src/main/java/generated/MainActivity.kt")!;
       if (!/\bpackage\s+generated\b/.test(mainFile.content) || !/\bclass\s+MainActivity\b/.test(mainFile.content)) throw new WorkbenchError("invalid_code", "The generated launcher class does not match the app manifest.", 422);
       for (const file of output.files) {
-        if (!/^app\/src\/(main|test)\/java\/generated\/[A-Za-z0-9_/-]+\.kt$/.test(file.path) || file.path.includes("..") || /ProcessBuilder|Runtime\.getRuntime|java\.net\.|System\.exit/.test(file.content)) throw new WorkbenchError("invalid_code", "Generated files fall outside the Android app implementation contract.", 422);
+        if (!/^app\/src\/(main|test)\/java\/generated\/[A-Za-z0-9_/-]+\.kt$/.test(file.path) || file.path.includes("..") || hasForbiddenSourceOperation(file.content)) throw new WorkbenchError("invalid_code", "Generated files fall outside the Android app implementation contract.", 422);
       }
       await fs.rm(path.join(source, "app/src/main/java"), { recursive: true, force: true }); await fs.rm(path.join(source, "app/src/test/java"), { recursive: true, force: true });
       for (const file of output.files) await write(path.join(source, file.path), file.content);

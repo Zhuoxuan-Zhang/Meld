@@ -60,8 +60,10 @@ def select_photo(filename):
 def passed(name):cases.append({'case':name,'passed':True});print('PASS '+name,flush=True)
 def bounds(node):return list(map(int,re.findall(r'\d+',node.get('bounds',''))))
 def nodes(text):return [x for x in n.tree().iter('node') if text in [x.get('text'),x.get('content-desc')] and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=20]
-aliases={'Back to editing':['Back to editing','Done'],'Rotate 90°':['Rotate 90°','Rotate'],'Star':['Star','star']}
+aliases={'Back to editing':['Back to editing','Done'],'Rotate 90°':['Rotate 90°','Rotate'],'Star':['Star','star','star sticker'],'Square':['Square','Square crop']}
 def scroll_to(text,field=False):
+ if not field and 'mInputShown=true' in n.adb('shell','dumpsys','input_method').decode():
+  n.adb('shell','input','keyevent','4');time.sleep(.3)
  for _ in range(12):
   tree=n.tree()
   found=[x for x in tree.iter('node') if (x.get('class')=='android.widget.EditText' and any(c.get('text')==text for c in x.iter('node'))) ] if field else [x for x in tree.iter('node') if text in [x.get('text'),x.get('content-desc')]]
@@ -78,6 +80,7 @@ def exported_paths():
 def click(text):
  global before_save
  options=aliases.get(text,[text,text.capitalize(),text.title()])
+ if text=='Rotate 90°':options=options+[x[0] for x in n.labels() if (x[0] or '').startswith('Rotate 90°')]
  for option in options:
   if any(option in [x.get('text'),x.get('content-desc')] for x in n.tree().iter('node')):
    text=option;break

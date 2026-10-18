@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { cp, readFile, writeFile } from 'node:fs/promises';
-import { androidBuildRunner } from '../../backend/src/build';
+import { cp, readFile, writeFile, rm } from 'node:fs/promises';
+import { androidBuildRunner, hasForbiddenSourceOperation } from '../../backend/src/build';
 import { exists, json, pipelineRoot, write, fileSha } from '../../pipeline/dist/src/integration.js';
 import { projectServer, idea } from './project-fixtures';
 
@@ -96,5 +96,35 @@ test('recovery distinguishes previously consumed APK feedback from genuinely new
     context = JSON.parse(first.prompt.trim().split('\n').at(-1));
     expect(context.issues).toContain('Newly observed loss of edited pixels.');
     expect(await exists(setup.marker)).toBe(false);
+  } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
+});
+
+
+test('source policy accepts heap reads but rejects process access and escaping Runtime aliases', () => {
+  expect(hasForbiddenSourceOperation('val available = Runtime.getRuntime().maxMemory()')).toBe(false);
+  expect(hasForbiddenSourceOperation('val runtime = Runtime.getRuntime()\nval used = runtime.totalMemory() - runtime.freeMemory()\nval available = runtime.maxMemory() - used')).toBe(false);
+  for (const source of [
+    'Runtime.getRuntime().exec("command")',
+    'val runtime = Runtime.getRuntime()\nruntime.exec("command")',
+    'val runtime = Runtime.getRuntime().exec("command")',
+    'val runtime = Runtime.getRuntime()\nreturn runtime',
+    'val runtime = Runtime.getRuntime()\nval escaped = runtime',
+    'ProcessBuilder("command")', 'System.exit(0)', 'java.net.URL("https://example.test")',
+  ]) expect(hasForbiddenSourceOperation(source), source).toBe(true);
+});
+
+test('a complete generated snapshot survives a source-gate interruption without repeating model generation', async () => {
+  const setup = await fixture(true), previous = process.env.MELD_CLAUDE_BIN;
+  process.env.MELD_CLAUDE_BIN = setup.cli;
+  const previousDirectory = path.join(path.dirname(setup.directory), setup.input.project.latestBuild!.id);
+  try {
+    await rm(path.join(previousDirectory, 'failure.json'));
+    await rm(path.join(previousDirectory, 'gradle-0.log'));
+    await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'model_output' });
+    const first = JSON.parse((await readFile(setup.calls, 'utf8')).trim().split('\n')[0]);
+    expect(first.schema.properties.passed).toBeDefined();
+    expect(await exists(path.join(setup.directory, 'generated-source-recovery.json'))).toBe(true);
+    expect(await exists(setup.marker)).toBe(false);
+    expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
 });
