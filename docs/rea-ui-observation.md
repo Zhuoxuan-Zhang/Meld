@@ -110,3 +110,11 @@ Localized source repairs use exact unique text edits. Substantial rewrites may i
 A complete generated snapshot can resume after a source-gate interruption without repeating generation. This records source recovery only: path/API checks, compilation, unit tests, lint, model review and configured runtime gates still run. The source policy permits direct heap-statistic reads, or a local immutable Runtime alias whose every use is a heap-statistic getter; process access and escaping aliases remain blocked.
 
 The opt-in image-editor regression records per-case progress with the tested APK digest. Its scroll helper rechecks autofocus-driven keyboard visibility after reading the hierarchy, resolves accessible aliases after scrolling, and clips gestures and target centers away from system navigation. A deterministic Python fixture exercises the keyboard-opening race and a target initially obscured by navigation; it cannot issue real adb commands.
+
+### Capture preflight and actionable UI failures
+
+Screen comparison checks its executable adb path before model calls or compilation. The observer and REA child use the same resolver (`REA_ADB_PATH`, then `MELD_ANDROID_ADB`, then the pipeline SDK); the web launcher forwards the override. This catches stale SDK paths before an expensive build.
+
+A failed expected/blocked-text assertion is eligible for a bounded app repair only when the scenario retained its screenshot, hierarchy and foreground-window evidence. The repair receives the scene goal and visible controls. Missing device or capture evidence stops with diagnostics instead of generating speculative app changes. The reference and tested APK hashes must still match before publication.
+
+The opt-in image-editor device gate also exercises portrait/landscape keyboard Apply, rotation with an unsaved caption draft, stable None thumbnails while a filter is pending, saved-image sharing preparation failure followed by Retry, and readable initial captions on a 12MP image. The sharing fault changes only the isolated generated app's cache directory permission and restores it in `finally`; no recipient is selected. These cases supplement exported-pixel and blur-performance checks, rather than substituting for original-app behavioral evidence.

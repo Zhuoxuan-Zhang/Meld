@@ -16,6 +16,7 @@ export { executeCodex, parseCodex, codexJsonSchema } from './codex.js';
 export { executeClaudeCli, parseClaudeCli, claudeJsonSchema } from './claude-cli.js';
 export { ObservationPlan, ObservationVision, collectObservation, validateObservation, compareObservations, observationDesignContext, replayObservation, rebuildReconstructionLedger } from './observation.js';
 export type { ObservationPlanT, ObservationManifestT } from './observation.js';
+export { observationAdbPath } from './investigation-client.js';
 export type { DesignModel } from './workbench/model.js';
 export type { RevisionDataT, UserDocumentT, ChangePlanT } from './workbench/schemas.js';
 export type DesignView = Awaited<ReturnType<import('./workbench/service.js').DesignService['get']>>;

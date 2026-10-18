@@ -5,6 +5,7 @@ import { cp, readFile, writeFile, rm } from 'node:fs/promises';
 import { androidBuildRunner, hasForbiddenSourceOperation } from '../../backend/src/build';
 import { exists, json, pipelineRoot, write, fileSha } from '../../pipeline/dist/src/integration.js';
 import { projectServer, idea } from './project-fixtures';
+import { uiAssertionIssues } from '../../backend/src/ui-validation';
 
 // Synthetic external-tool fixtures establish orchestration and recovery only.
 // Real compilation, model review and device behavior are checked by live runs.
@@ -42,8 +43,9 @@ process.stdout.write(JSON.stringify({structured_output:output}));
 `, { mode: 0o755 });
   const marker = path.join(api.root, 'native-executed'), native = path.join(api.root, 'native.py');
   await writeFile(native, `from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text('unexpected')\nraise SystemExit(1)\n`);
-  const runner = androidBuildRunner({ sdk, javaHome, templateDirectory: template, nativeSmoke: { projectId: project.id, script: native, adb: '/unused-fixture-adb', serial: 'fixture', output: path.join(api.root, 'device') } });
-  return { api, cli, calls, marker, directory, input: { project, revision, designHash, directory, design: { developer_design: { title: 'Synthetic' } }, progress: async () => {} }, runner };
+  const environment = { sdk, javaHome, templateDirectory: template, nativeSmoke: { projectId: project.id, script: native, adb: '/unused-fixture-adb', serial: 'fixture', output: path.join(api.root, 'device') } };
+  const runner = androidBuildRunner(environment);
+  return { api, cli, calls, marker, directory, environment, input: { project, revision, designHash, directory, design: { developer_design: { title: 'Synthetic' } }, progress: async () => {} }, runner };
 }
 
 test('a rejected implementation review cannot reach device checks or publish an APK', async () => {
@@ -127,4 +129,38 @@ test('a complete generated snapshot survives a source-gate interruption without 
     expect(await exists(setup.marker)).toBe(false);
     expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
+});
+
+
+test('captured app assertions provide concrete repair findings while missing evidence stays unverified', () => {
+  const artifact = { path: 'fixture', sha256: 'a'.repeat(64) };
+  const scene = { id: 'adjust', goal: 'Keep the photo and Apply/Cancel visible.', required: true, status: 'failed' as const, screenshot: artifact, hierarchy: artifact, window: artifact, visibleText: ['Brightness', 'Contrast'], error: 'Error: Expected visible text missing: Apply' };
+  const issues = uiAssertionIssues([scene, { ...scene, id: 'device', error: 'Error: REA adb is unavailable' }, { ...scene, id: 'foreground', error: 'Error: Captured foreground window does not belong to the planned app' }, { ...scene, id: 'no-image', screenshot: undefined }, { ...scene, id: 'optional', required: false }]);
+  expect(issues).toHaveLength(1);
+  expect(issues[0]).toContain('Screen adjust');
+  expect(issues[0]).toContain('Apply');
+  expect(issues[0]).toContain('Brightness | Contrast');
+});
+
+test('an invalid explicitly selected REA adb fails before model, compiler and native work', async () => {
+  const setup = await fixture();
+  const previous = process.env.REA_ADB_PATH, fallback = process.env.MELD_ANDROID_ADB;
+  try {
+    const config = path.join(setup.api.root, 'ui-config.json');
+    await write(config, { projects: { [setup.input.project.id]: {
+      referenceDirectory: 'not-yet-needed-reference', serial: 'fixture',
+      scenarios: [{ id: 'home', goal: 'Show the image editor home screen.', steps: [], expectedText: ['Choose photo'] }],
+      vision: { provider: 'codex_cli', model: 'fixture-model', reasoningEffort: 'low' },
+    } } });
+    process.env.REA_ADB_PATH = path.join(setup.api.root, 'missing-platform-tools/adb');
+    process.env.MELD_ANDROID_ADB = setup.cli;
+    await expect(androidBuildRunner({ ...setup.environment, uiValidationConfig: config })(setup.input)).rejects.toMatchObject({ code: 'ui_environment' });
+    expect(await exists(setup.calls)).toBe(false);
+    expect(await exists(setup.marker)).toBe(false);
+    expect(await exists(path.join(setup.directory, 'gradle-0.log'))).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.REA_ADB_PATH; else process.env.REA_ADB_PATH = previous;
+    if (fallback === undefined) delete process.env.MELD_ANDROID_ADB; else process.env.MELD_ANDROID_ADB = fallback;
+    await setup.api.close();
+  }
 });

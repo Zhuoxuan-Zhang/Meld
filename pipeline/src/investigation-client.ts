@@ -34,6 +34,10 @@ export function validateInvestigationScope(name: InvestigationTool, args: Record
   if (['export_evidence_bundle', 'import_evidence_bundle'].includes(name)) inside(directory, args.path);
 }
 
+export function observationAdbPath(toolRoot: string): string {
+  return process.env.REA_ADB_PATH || process.env.MELD_ANDROID_ADB || path.join(toolRoot, 'tools/android-sdk/platform-tools/adb');
+}
+
 export class InvestigationClient {
   private client = new Client({ name: 'meld-reference-observation', version: '0.1.0' });
   private validators = new Map<string, any>();
@@ -43,7 +47,7 @@ export class InvestigationClient {
     if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('REA requires Node >=22.19; use pipeline/tools/node/bin/node');
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) if (value && !/API_KEY|ACCESS_TOKEN|AUTH_TOKEN/.test(key)) env[key] = value;
-    env.REA_ADB_PATH ||= env.MELD_ANDROID_ADB || path.join(this.toolRoot, 'tools/android-sdk/platform-tools/adb');
+    env.REA_ADB_PATH = observationAdbPath(this.toolRoot);
     const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(this.toolRoot, 'vendor/rea/scripts/rea.mjs'), 'mcp'], cwd: this.toolRoot, env, stderr: 'pipe' });
     await fs.mkdir(this.directory, { recursive: true });
     let stderr = '';

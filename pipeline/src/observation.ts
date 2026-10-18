@@ -2,7 +2,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { XMLParser } from 'fast-xml-parser';
-import { InvestigationClient } from './investigation-client.js';
+import { InvestigationClient, observationAdbPath } from './investigation-client.js';
 import { json, write, fileSha, files, inside, execLogged, sha, exists, redact } from './storage.js';
 import { executeCodex, parseCodex, codexJsonSchema } from './codex.js';
 import { executeClaudeCli, parseClaudeCli } from './claude-cli.js';
@@ -152,7 +152,7 @@ async function collectObservationUnlocked(toolRoot: string, directory: string, p
   const scenarios: z.infer<typeof ScenarioCapture>[] = [];
   let graphStatus: 'observed' | 'unavailable' = 'unavailable', connected = false;
   const artifact = async (file: string) => ({ path: path.relative(directory, file), sha256: await fileSha(file) });
-  const adbPath = process.env.REA_ADB_PATH || process.env.MELD_ANDROID_ADB || path.join(toolRoot, 'tools/android-sdk/platform-tools/adb');
+  const adbPath = observationAdbPath(toolRoot);
   let actionIndex = 0;
   const adb = (args: string[]) => execLogged(adbPath, ['-s', plan.serial!, ...args], path.join(directory, 'actions', `${++actionIndex}.json`), 30000, 4 * 1024 * 1024);
   const hierarchy = async () => {

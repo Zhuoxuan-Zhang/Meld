@@ -6,7 +6,7 @@ import { buildModelJson as modelJson } from "./model";
 import { sha } from "../../pipeline/dist/src/storage.js";
 import { generateSources, SourceFiles, recoverCompletedBatch, recoverRepairPrefix, removeSourceFiles } from "./codegen";
 import type { BuildRunner } from "./projects";
-import { uiValidationEntry, uiReferenceContext, validateBuiltUi } from "./ui-validation";
+import { uiValidationEntry, uiReferenceContext, validateBuiltUi, uiObservationPreflight } from "./ui-validation";
 import type { Project } from "../../shared/contracts";
 
 export function hasForbiddenSourceOperation(source: string): boolean {
@@ -104,6 +104,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
     if (!(await exists(path.join(environment.sdk, "platforms/android-35/android.jar"))) || !(await exists(path.join(environment.javaHome, "bin/java")))) throw new WorkbenchError("build_environment", "Configure Android SDK 35 and JDK 17+ on the backend before building.", 503);
     const source = path.join(input.directory, "source"), model = path.join(input.directory, "model"), packageId = `com.meld.apps.p${input.project.id.replace(/[^a-f0-9]/g, "").slice(-24)}`;
     const uiEntry = await uiValidationEntry(environment.uiValidationConfig, input.project.id, input.project.featurePreferences?.baseAppId);
+    if (uiEntry) await uiObservationPreflight();
     const visualReference = uiEntry ? await uiReferenceContext(uiEntry) : null;
     let uiReport: Awaited<ReturnType<typeof validateBuiltUi>> | null = null;
     await fs.mkdir(source, { recursive: true }); await fs.cp(environment.templateDirectory, source, { recursive: true });
@@ -262,7 +263,14 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
       uiReport = null;
       if (uiEntry) {
         await input.progress("Comparing your app screens with the original reference…");
-        uiReport = await validateBuiltUi(uiEntry, path.join(source, "app/build/outputs/apk/debug/app-debug.apk"), packageId, path.join(input.directory, `ui-round-${round}`), input.design, visualReference!.manifestSha256);
+        try {
+          uiReport = await validateBuiltUi(uiEntry, path.join(source, "app/build/outputs/apk/debug/app-debug.apk"), packageId, path.join(input.directory, `ui-round-${round}`), input.design, visualReference!.manifestSha256);
+        } catch (error) {
+          if (!(error instanceof WorkbenchError) || error.code !== "ui_assertion") throw error;
+          prior = output; issues = [error.message];
+          await write(path.join(input.directory, "failure.json"), { issues, stage: "visual", round, captureDiagnostics: `ui-round-${round}/capture-diagnostics.json` });
+          continue;
+        }
         if (!uiReport.passed) {
           if (uiReport.review.verdict === "unknown") throw new WorkbenchError("ui_evidence_missing", "UI comparison needs complete matching original and candidate scenarios. Diagnostics are saved.", 422);
           prior = output;
