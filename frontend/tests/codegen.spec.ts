@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { generateSources, checkSourcePaths, recoverCompletedBatch, recoverRepairPrefix, applySourceEdits } from "../../backend/src/codegen";
+import { generateSources, checkSourcePaths, recoverCompletedBatch, recoverRepairPrefix, applySourceEdits, applySourceRepair } from "../../backend/src/codegen";
 import { write, fileSha } from "../../pipeline/dist/src/integration.js";
 import { readRuntimeFeedback, approvedOutlineForBuild } from "../../backend/src/build";
 import { parseClaudeCli } from "../../pipeline/dist/src/claude-cli.js";
@@ -143,7 +143,7 @@ test("accepted repair responses resume an interrupted prefix and reject an inval
   try {
     await write(path.join(directory, "repair-plan-0-1/response.json"), response(plan, 13984));
     await write(path.join(directory, "repair-plan-0-1/prompt.txt"), "instructions\n" + JSON.stringify({ prior, integration: { manifest: "fixture-manifest" }, issues: ["fix"], approvedDesign: { title: "fixture" }, appProfile: { name: "fixture" } }));
-    await write(path.join(directory, "repair-file-0-0-2/response.json"), response({ path: main, content: "fixed" }));
+    await write(path.join(directory, "repair-file-0-0-2/response.json"), response({ path: main, content: "fixed", edits: null }));
     await write(path.join(directory, "repair-file-0-1-3/response.json"), { ...response({ path: tests, content: "new tests" }), errors: ["incomplete"] });
     expect(await recoverRepairPrefix(directory, { manifest: "changed-manifest" })).toBeNull();
     expect((await recoverRepairPrefix(directory, { manifest: "fixture-manifest" }))?.files).toHaveLength(1);
@@ -345,5 +345,24 @@ test("a saved oversized plan is reused only as a candidate for correction, never
       return { path: main, edits: [{ find: "old", replace: "fixed" }] };
     }) as any);
     expect(labels[0]).toBe("repair-plan-0-validation-retry-1"); expect(result.files).toHaveLength(20);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("substantial rewrites use complete contents without duplicating old text and retain exact-file recovery safety", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-source-replacement-"));
+  const prior = { files: [{ path: main, content: "old source" }, { path: tests, content: "keep tests" }], explanation: "fixture" };
+  try {
+    const output = await generateSources(directory, 0, "fixture", {}, prior, ["rewrite coordinator"], async () => {}, (async (_dir: string, label: string, _instructions: string, _data: any, schema: any) => {
+      if (label.startsWith("repair-plan")) return { interfaces: [], files: [{ path: main, responsibility: "coordinator rewrite" }] };
+      return schema.parse({ path: main, edits: null, content: "package generated\nclass MainActivity" });
+    }) as any);
+    expect(output.files).toEqual([{ path: main, content: "package generated\nclass MainActivity" }, prior.files[1]]);
+    for (const patch of [
+      { path: tests, content: "foreign", edits: null },
+      { path: main, content: "ambiguous", edits: [{ find: "old source", replace: "patch" }] },
+      { path: main, content: null, edits: null },
+    ]) expect(() => applySourceRepair(prior.files[0], patch)).toThrow();
+    expect(prior.files[0].content).toBe("old source");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

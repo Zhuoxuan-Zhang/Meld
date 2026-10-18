@@ -22,6 +22,19 @@ export function applySourceEdits(original: z.infer<typeof SourceFile>, patch: z.
   }
   return SourceFile.parse({ path: original.path, content });
 }
+const SourceRepair = z.object({
+  path: SourceFile.shape.path,
+  edits: SourceEdits.shape.edits.nullable().default(null),
+  content: SourceFile.shape.content.nullable().default(null),
+}).strict();
+export function applySourceRepair(original: z.infer<typeof SourceFile>, value: unknown) {
+  const patch = SourceRepair.parse(value);
+  if (patch.path !== original.path) throw new WorkbenchError("invalid_code", "The repaired file does not match its planned module.", 422);
+  checkSourcePaths([original]);
+  if (patch.edits !== null && patch.content === null) return applySourceEdits(original, { path: patch.path, edits: patch.edits });
+  if (patch.edits === null && patch.content !== null) return SourceFile.parse({ path: patch.path, content: patch.content });
+  throw new WorkbenchError("invalid_code", "Choose exact edits or complete replacement contents, never both or neither.", 422);
+}
 export const SourceFiles = z.object({ files: z.array(SourceFile).min(1).max(20), explanation: z.string().max(3000) }).strict();
 const PatchPlan = z.object({ interfaces: z.array(z.string().max(2000)).max(40), removePaths: z.array(z.string().max(240)).max(20).default([]), files: z.array(z.object({ path: z.string().max(240), responsibility: z.string().max(2000) }).strict()).max(20) }).strict();
 const Plan = z.object({ interfaces: z.array(z.string().max(2000)).max(40), files: z.array(z.object({ path: z.string().max(240), responsibility: z.string().max(2000) }).strict()).min(2).max(16) }).strict();
@@ -105,15 +118,15 @@ export async function generateSources(directory: string, round: number, instruct
       };
       let generated: z.infer<typeof SourceFile>;
       if (existing) {
-        const editSchema = SourceEdits.extend({ path: z.literal(file.path) });
-        const editInstructions = instructions + ` Repair only ${file.path}; return that exact path. Use minimal exact text replacements. Each find string must occur exactly once in that file's current contents; edits apply in order. Use short unique anchors when adding tests or helpers. Return only changed text, never the entire unchanged file. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.`;
+        const editSchema = SourceRepair.extend({ path: z.literal(file.path) });
+        const editInstructions = instructions + ` Repair only ${file.path}; return that exact path. For localized fixes, return edits with content:null: each find string must occur exactly once in the current file and edits apply in order. Use short unique anchors. For a substantial rewrite, return the complete new content with edits:null, avoiding a duplicate quotation of the old file. Choose exactly one form. Keep unchanged functionality and interfaces unless the approved repair requires changes. Preserve existing functionality and tests. Follow the complete repair plan and exact shared signatures. Do not emit Markdown fences.`;
         const patch = await askRepair(editSchema, editInstructions, "medium");
-        try { generated = applySourceEdits(existing, patch); }
+        try { generated = applySourceRepair(existing, patch); }
         catch (error) {
           if ((error as WorkbenchError).code !== "invalid_code") throw error;
           await progress(`Refining app corrections ${index + 1} of ${plan.files.length}…`);
           const corrected = await ask(directory, `repair-file-${round}-${index}-edit-retry`, editInstructions + " The prior patch did not match the requested path or exact current file. Recreate the smallest valid patch using the supplied unchanged current file and validation error. Use exact unique anchors; do not assume any rejected edit was applied.", { ...context, rejectedPatch: patch, validationError: String(error) }, editSchema, moduleExecutionBudget, "low", moduleTimeout);
-          generated = applySourceEdits(existing, corrected);
+          generated = applySourceRepair(existing, corrected);
         }
       } else {
         generated = await askRepair(SourceFile.extend({ path: z.literal(file.path) }), instructions + ` Generate only ${file.path}; return that exact path and its full contents according to the complete repair plan. Follow the agreed shared signatures and current application declarations. Keep the module concise and complete, aiming for 800–1800 output tokens without repeated boilerplate. Do not emit Markdown fences.`, "low");
@@ -213,11 +226,11 @@ export async function recoverRepairPrefix(modelDirectory: string, expectedIntegr
           const response = await json(responseFile);
           try { parsed = parseCodex(response, SourceFile, 24000); }
           catch {
-            const patch = parseCodex(response, SourceEdits, moduleExecutionBudget);
+            const patch = parseCodex(response, SourceRepair, moduleExecutionBudget);
             const originals = new Map(remaining.map(file => [file.path, file]));
             for (const saved of files) originals.set(saved.path, saved);
             const original = originals.get(file.path); if (!original) break;
-            parsed = applySourceEdits(original, patch);
+            parsed = applySourceRepair(original, patch);
           }
           checkSourcePaths([parsed]);
         } catch { break; }
