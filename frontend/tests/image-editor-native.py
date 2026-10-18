@@ -57,34 +57,45 @@ def select_photo(filename):
    b=bounds(options[0]);n.adb('shell','input','tap',str(b[0]+15),str(b[3]-15));return
   n.adb('shell','input','swipe','240','800','240','300','350')
  raise HarnessSelectorError('Test photo is not reachable in the system picker: '+filename)
-def passed(name):cases.append({'case':name,'passed':True});print('PASS '+name,flush=True)
+def passed(name):
+ cases.append({'case':name,'passed':True})
+ (ROOT/'runtime-progress.json').write_text(json.dumps({'status':'running','apkSha256':digest,'packageId':PKG,'cases':cases},indent=2))
+ print('PASS '+name,flush=True)
 def bounds(node):return list(map(int,re.findall(r'\d+',node.get('bounds',''))))
 def nodes(text):return [x for x in n.tree().iter('node') if text in [x.get('text'),x.get('content-desc')] and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=20]
 aliases={'Back to editing':['Back to editing','Done'],'Rotate 90°':['Rotate 90°','Rotate'],'Star':['Star','star','star sticker'],'Square':['Square','Square crop']}
 def scroll_to(text,field=False):
- if not field and 'mInputShown=true' in n.adb('shell','dumpsys','input_method').decode():
-  n.adb('shell','input','keyevent','4');time.sleep(.3)
- for _ in range(12):
+ for _ in range(20):
   tree=n.tree()
-  found=[x for x in tree.iter('node') if (x.get('class')=='android.widget.EditText' and any(c.get('text')==text for c in x.iter('node'))) ] if field else [x for x in tree.iter('node') if text in [x.get('text'),x.get('content-desc')]]
+  # Autofocus can open the IME after the tap and before the first UI tree.
+  if not field and 'mInputShown=true' in n.adb('shell','dumpsys','input_method').decode():
+   n.adb('shell','input','keyevent','4');time.sleep(.4);continue
+  densities=re.findall(r'(?:Physical|Override) density:\s*(\d+)',n.adb('shell','wm','density').decode());density=int(densities[-1]) if densities else 160
+  window_bottom=max((bounds(x)[3] for x in tree.iter('node') if len(bounds(x))==4),default=960)
+  tap_bottom=window_bottom-max(24,round(24*density/160))
+  choices=aliases.get(text,[text,text.capitalize(),text.title()])
+  found=[x for x in tree.iter('node') if (x.get('class')=='android.widget.EditText' and any(c.get('text')==text for c in x.iter('node'))) ] if field else [x for x in tree.iter('node') if any(value in choices or (text=='Rotate 90°' and (value or '').startswith('Rotate 90°')) for value in [x.get('text'),x.get('content-desc')])]
   if field and not found and text in ['Text','Caption']:
    editable=[x for x in tree.iter('node') if x.get('class')=='android.widget.EditText']
    if len(editable)==1:found=editable
-  found=[x for x in found if len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=25]
+  found=[x for x in found if len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=25 and (bounds(x)[1]+bounds(x)[3])//2<tap_bottom]
   if found:return found[0]
-  n.adb('shell','input','swipe','390','800','390','600','350')
+  owners=[x for x in tree.iter('node') if x.get('package')==PKG and x.get('scrollable')=='true' and x.get('class')=='android.widget.ScrollView' and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>40]
+  if not owners:raise HarnessSelectorError('No app scroll container for '+text+' '+str(n.labels()))
+  b=bounds(max(owners,key=lambda x:bounds(x)[3]-bounds(x)[1]))
+  bottom=min(b[3],window_bottom-max(48,round(48*density/160)))
+  if bottom-b[1]<40:raise HarnessSelectorError('App scroll viewport is too short for '+text)
+  x=b[0]+min(36,(b[2]-b[0])//4);start=bottom-12;end=max(b[1]+12,int(start-min(240,(bottom-b[1])*.45)))
+  n.adb('shell','input','swipe',str(x),str(start),str(x),str(end),'350')
  raise HarnessSelectorError('Action not reachable: '+text)
 before_save=set()
 def exported_paths():
  return {p for p in n.adb('shell','find','/sdcard/Pictures','/sdcard/Download','-type','f').decode().splitlines() if p.lower().endswith(('.jpg','.jpeg'))}
 def click(text):
  global before_save
- options=aliases.get(text,[text,text.capitalize(),text.title()])
- if text=='Rotate 90°':options=options+[x[0] for x in n.labels() if (x[0] or '').startswith('Rotate 90°')]
- for option in options:
-  if any(option in [x.get('text'),x.get('content-desc')] for x in n.tree().iter('node')):
-   text=option;break
- scroll_to(text)
+ node=scroll_to(text)
+ choices=aliases.get(text,[text,text.capitalize(),text.title()])
+ text=next(value for value in [node.get('text'),node.get('content-desc')] if value in choices or (text=='Rotate 90°' and (value or '').startswith('Rotate 90°')))
  if text=='Save copy':before_save=exported_paths()
  until=time.monotonic()+35
  while True:
@@ -111,13 +122,13 @@ def dimensions(w,h):
  # compact editor exposes only an image description instead of a size label.
  labels=n.labels()
  if any(f'{w} by {h} pixels' in (x[0] or '') for x in labels):return
- n.tap('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'))
+ click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'))
  exported=latest_export('geometry-'+str(time.time_ns())+'.jpg')
  assert Image.open(exported).size==(w,h),(Image.open(exported).size,(w,h))
  click('Back to editing');mode_editor()
 
 def export_probe(name):
- n.tap('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'))
+ click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'))
  image=Image.open(latest_export(name)).convert('RGB').copy()
  click('Back to editing');mode_editor();return image
 
@@ -146,7 +157,7 @@ def verify_large_blur():
  b=bounds(paint[0]);start=time.monotonic()
  n.adb('shell','input','swipe',str(int(b[0]+.35*(b[2]-b[0]))),str((b[1]+b[3])//2),str(int(b[0]+.65*(b[2]-b[0]))),str((b[1]+b[3])//2),'350')
  time.sleep(1);click('Apply');mode_editor();preview_ms=round((time.monotonic()-start)*1000)
- n.tap('Save and share');start=time.monotonic();click('Save copy');wait_label(lambda x:x.startswith('Saved'),45);export_ms=round((time.monotonic()-start)*1000)
+ click('Save and share');start=time.monotonic();click('Save copy');wait_label(lambda x:x.startswith('Saved'),45);export_ms=round((time.monotonic()-start)*1000)
  exported=latest_export('verified-12mp-blur.jpg');image=Image.open(exported).convert('RGB');original=Image.open(ROOT/'test-camera-12mp.jpg').convert('RGB')
  assert image.size==(4000,3000),('12MP export dimensions',image.size)
  before=statistics.pstdev(original.getpixel((x,1500))[0] for x in range(1500,2400));after=statistics.pstdev(image.getpixel((x,1500))[0] for x in range(1500,2400))
@@ -161,7 +172,7 @@ try:
  select_photo('image-editor-original.jpg');mode_editor();dimensions(800,600);passed('import')
  n.tap('Shape');click('Rotate 90°');click('Apply');mode_editor();dimensions(600,800);passed('rotate')
  n.tap('Undo');dimensions(800,600);passed('undo');n.tap('Redo');dimensions(600,800);passed('redo')
- n.tap('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'));rotated=latest_export('verified-rotated.jpg');assert Image.open(rotated).size==(600,800);passed('save-rotated-copy')
+ click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'));rotated=latest_export('verified-rotated.jpg');assert Image.open(rotated).size==(600,800);passed('save-rotated-copy')
  click('Back to editing');mode_editor();n.tap('Undo');dimensions(800,600);n.tap('Shape')
  if any('Right crop edge' in (x[0] or '') for x in n.labels()):
   field('Right crop edge (px)','400');field('Bottom crop edge (px)','300');crop_size=(400,300)
@@ -180,11 +191,12 @@ try:
  if any(x[0]=='Add text' for x in n.labels()):click('Add text')
  field('Text','Hello');click('Apply');mode_editor();after_text=export_probe('after-text.jpg');assert_pixels_changed(before_text,after_text,'Text');passed('text-overlay')
  n.tap('Text and stickers');click('Star');click('Apply');mode_editor();after_sticker=export_probe('after-sticker.jpg');assert_pixels_changed(after_text,after_sticker,'Sticker');passed('sticker-overlay');n.shot('android-edited-final')
- n.tap('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'));final=latest_export('verified-edited.jpg');im=Image.open(final).convert('RGB');assert im.size==crop_size;assert_pixels_changed(before_adjust,im,'Combined edits');passed('export-edited-pixels-and-dimensions')
+ click('Save and share');click('Save copy');wait_label(lambda x:x.startswith('Saved'));final=latest_export('verified-edited.jpg');im=Image.open(final).convert('RGB');assert im.size==crop_size;assert_pixels_changed(before_adjust,im,'Combined edits');passed('export-edited-pixels-and-dimensions')
  assert hashlib.sha256(n.adb('exec-out','cat','/sdcard/Download/image-editor-original.jpg')).digest()==hashlib.sha256((ROOT/'test-original.jpg').read_bytes()).digest();passed('original-unchanged')
  click('Share');time.sleep(2);activity=n.adb('shell','dumpsys','activity','activities').decode();assert re.search(r'(?:mResumedActivity|topResumedActivity|ResumedActivity).*?(?:ChooserActivity|ResolverActivity|intentresolver)',activity) or any('Quick Share' in (x[0] or '') for x in n.labels()),n.labels();n.shot('android-share-final');passed('android-share-sheet')
  n.adb('shell','input','keyevent','4');click('Back to editing');mode_editor();n.shot('android-editor-final')
  verify_large_blur()
- report={'passed':True,'apkSha256':digest,'packageId':PKG,'device':{'serial':n.SERIAL,'api':n.adb('shell','getprop','ro.build.version.sdk').decode().strip(),'abi':n.adb('shell','getprop','ro.product.cpu.abi').decode().strip(),'display':n.adb('shell','wm','size').decode().strip()},'cases':cases,'scope':'Actual APK import, geometry, pixel history, crop+color combination, filters, text/stickers, JPEG export pixels, 12MP painted blur performance and Android sharing. No message was sent.'};(ROOT/'runtime-report.json').write_text(json.dumps(report,indent=2));print('All native regression checks passed.',flush=True)
+ report={'passed':True,'apkSha256':digest,'packageId':PKG,'device':{'serial':n.SERIAL,'api':n.adb('shell','getprop','ro.build.version.sdk').decode().strip(),'abi':n.adb('shell','getprop','ro.product.cpu.abi').decode().strip(),'display':n.adb('shell','wm','size').decode().strip()},'cases':cases,'scope':'Actual APK import, geometry, pixel history, crop+color combination, filters, text/stickers, JPEG export pixels, 12MP painted blur performance and Android sharing. No message was sent.'};(ROOT/'runtime-report.json').write_text(json.dumps(report,indent=2));(ROOT/'runtime-progress.json').write_text(json.dumps({'status':'passed','apkSha256':digest,'packageId':PKG,'cases':cases},indent=2));print('All native regression checks passed.',flush=True)
 except Exception as error:
+ (ROOT/'runtime-progress.json').write_text(json.dumps({'status':'failed','apkSha256':digest,'packageId':PKG,'cases':cases,'error':str(error)},indent=2))
  n.shot('android-regression-failure');(ROOT/'native-regression-failure.json').write_text(json.dumps({'passed':False,'apkSha256':digest,'cases':cases,'error':str(error)},indent=2));print(traceback.format_exc(),flush=True);sys.exit(1)
