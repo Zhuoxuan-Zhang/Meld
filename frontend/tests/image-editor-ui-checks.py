@@ -53,10 +53,10 @@ def verify(h):
     if found:tap_node(found[0]);n.adb('shell','input','text',value);time.sleep(.5);return
     scroll_controls()
    raise RuntimeError('Caption input not reachable: '+str(n.labels()))
-  def scroll_controls():
-   current=n.tree();candidates=[x for x in current.iter('node') if x.get('scrollable')=='true' and x.get('package')==pkg and x.get('class')=='android.widget.ScrollView' and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>40]
+  def scroll_controls(current=None,bottom_limit=None):
+   current=current if current is not None else n.tree();candidates=[x for x in current.iter('node') if x.get('scrollable')=='true' and x.get('package')==pkg and x.get('class')=='android.widget.ScrollView' and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>40]
    if not candidates:raise RuntimeError('No editor scroll owner: '+str(n.labels()))
-   b=bounds(max(candidates,key=lambda x:bounds(x)[3]-bounds(x)[1]));bottom=min(b[3],safe_bottom(current));start=bottom-12;end=max(b[1]+12,int(start-min(240,(bottom-b[1])*.45)))
+   b=bounds(max(candidates,key=lambda x:bounds(x)[3]-bounds(x)[1]));bottom=min(b[3],safe_bottom(current) if bottom_limit is None else bottom_limit);start=bottom-12;end=max(b[1]+12,int(start-min(240,(bottom-b[1])*.45)))
    if start<=end:raise RuntimeError('Keyboard leaves no usable scroll viewport')
    n.adb('shell','input','swipe',str(b[0]+36),str(start),str(b[0]+36),str(end),'350')
   def apply_with_keyboard(name):
@@ -66,7 +66,7 @@ def verify(h):
     controls=[x for x in current.iter('node') if bounds(x) and bounds(x)[3]<limit and x.get('text')=='Apply' and x.get('enabled')=='true' and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=30]
     if controls:
      snap(name);tap_node(controls[0]);h['mode_editor']();return
-    scroll_controls()
+    scroll_controls(current,limit)
    raise RuntimeError('Apply could not be reached while the keyboard stayed open')
   def set_rotation(value):
    n.adb('shell','settings','put','system','accelerometer_rotation','0');n.adb('shell','settings','put','system','user_rotation',str(value));time.sleep(2)
