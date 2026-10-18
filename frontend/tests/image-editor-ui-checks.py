@@ -6,6 +6,16 @@ never submit a share; the cache-permission fault is scoped and restored.
 import time,re,json
 from PIL import Image,ImageChops,ImageStat
 
+
+def keyboard_content_top(windows):
+  """IME content insets are window-local; expose their absolute screen Y."""
+  for block in re.split(r'(?=  Window #\d+)', windows):
+    if not re.search(r'^  Window #\d+.* InputMethod', block):continue
+    frame=re.search(r'Frames:.*? frame=\[(-?\d+),(-?\d+)\]',block)
+    inset=re.search(r'mGivenContentInsets=\[-?\d+,(-?\d+)\]',block)
+    if frame and inset:return int(frame[2])+int(inset[1])
+  raise RuntimeError('Visible keyboard frame/insets unavailable')
+
 def verify(h):
   n=h['n'];bounds=h['bounds'];pkg=h['PKG'];folder=h['ROOT'];digest=h['digest']
   cases=[];issues=[];metrics={}
@@ -22,8 +32,7 @@ def verify(h):
    bottom=max((bounds(x)[3] for x in current.iter('node') if len(bounds(x))==4),default=960)-round((24 if tap else 48)*density/160)
    ime=n.adb('shell','dumpsys','input_method').decode()
    if 'mInputShown=true' in ime:
-    tops=re.findall(r'contentTopInsets=(\d+)',ime)
-    if tops:bottom=min(bottom,int(tops[-1])-8)
+    bottom=min(bottom,keyboard_content_top(n.adb('shell','dumpsys','window','windows').decode()))
    return bottom
   def choose_tool(name):
    for _ in range(16):

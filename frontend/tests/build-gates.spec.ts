@@ -164,3 +164,29 @@ test('an invalid explicitly selected REA adb fails before model, compiler and na
     await setup.api.close();
   }
 });
+
+
+test('a signalled native process stops as a harness failure without app repair', async () => {
+  const setup = await fixture(), previous = process.env.MELD_CLAUDE_BIN;
+  process.env.MELD_CLAUDE_BIN = setup.cli;
+  try {
+    await writeFile(setup.cli, (await readFile(setup.cli, 'utf8')).replace('passed:false', 'passed:true').replace("issues:['[blocking] Crop controls are placeholders.']", 'issues:[]'));
+    await writeFile(setup.environment.nativeSmoke.script, 'import os,signal\nos.kill(os.getpid(),signal.SIGTERM)\n');
+    await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'native_harness', message: expect.stringContaining('SIGTERM') });
+    expect((await json(path.join(setup.directory, 'failure.json'))).stage).toBe('native');
+    expect((await readFile(setup.calls, 'utf8')).trim().split('\n')).toHaveLength(1);
+    expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
+  } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
+});
+
+test('legacy null-exit native interruption retries source without generating app changes', async () => {
+  const setup = await fixture(true), previous = process.env.MELD_CLAUDE_BIN;
+  process.env.MELD_CLAUDE_BIN = setup.cli;
+  try {
+    await write(path.join(path.dirname(setup.directory), setup.input.project.latestBuild!.id, 'failure.json'), { stage: 'native', issues: ['Actual Android UI checks failed (null). PASS launch'] });
+    await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'model_output' });
+    const first = JSON.parse((await readFile(setup.calls, 'utf8')).trim().split('\n')[0]);
+    expect(first.schema.properties.passed).toBeDefined();
+    expect(await exists(path.join(setup.directory, 'harness-retry.json'))).toBe(true);
+  } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
+});
