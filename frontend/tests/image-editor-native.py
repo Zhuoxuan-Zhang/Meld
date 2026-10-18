@@ -168,6 +168,9 @@ def verify_large_blur():
 
 try:
  n.adb('shell','am','force-stop',PKG);n.adb('install','-r',str(snapshot));n.adb('push',str(ROOT/'test-original.jpg'),'/sdcard/Download/image-editor-original.jpg');n.adb('shell','am','broadcast','-a','android.intent.action.MEDIA_SCANNER_SCAN_FILE','-d','file:///sdcard/Download/image-editor-original.jpg');n.adb('shell','am','start','-W','-f','0x10008000','-n',PKG+'/generated.MainActivity');wait_label(lambda x:x=='Choose photo');passed('launch')
+ # Run the largest image first so memory/performance regressions fail promptly.
+ verify_large_blur()
+ n.adb('shell','am','force-stop',PKG);n.adb('shell','am','start','-W','-f','0x10008000','-n',PKG+'/generated.MainActivity');wait_label(lambda x:x=='Choose photo')
  n.tap('Choose photo');time.sleep(1)
  select_photo('image-editor-original.jpg');mode_editor();dimensions(800,600);passed('import')
  n.tap('Shape');click('Rotate 90°');click('Apply');mode_editor();dimensions(600,800);passed('rotate')
@@ -195,7 +198,6 @@ try:
  assert hashlib.sha256(n.adb('exec-out','cat','/sdcard/Download/image-editor-original.jpg')).digest()==hashlib.sha256((ROOT/'test-original.jpg').read_bytes()).digest();passed('original-unchanged')
  click('Share');time.sleep(2);activity=n.adb('shell','dumpsys','activity','activities').decode();assert re.search(r'(?:mResumedActivity|topResumedActivity|ResumedActivity).*?(?:ChooserActivity|ResolverActivity|intentresolver)',activity) or any('Quick Share' in (x[0] or '') for x in n.labels()),n.labels();n.shot('android-share-final');passed('android-share-sheet')
  n.adb('shell','input','keyevent','4');click('Back to editing');mode_editor();n.shot('android-editor-final')
- verify_large_blur()
  spec=importlib.util.spec_from_file_location('image_editor_ui_checks',pathlib.Path(__file__).with_name('image-editor-ui-checks.py'))
  ui_checks=importlib.util.module_from_spec(spec);spec.loader.exec_module(ui_checks);ui_checks.verify(globals())
  report={'passed':True,'apkSha256':digest,'packageId':PKG,'device':{'serial':n.SERIAL,'api':n.adb('shell','getprop','ro.build.version.sdk').decode().strip(),'abi':n.adb('shell','getprop','ro.product.cpu.abi').decode().strip(),'display':n.adb('shell','wm','size').decode().strip()},'cases':cases,'scope':'Actual APK import, geometry, pixel history, crop+color combination, filters, text/stickers, JPEG export pixels, 12MP painted blur performance, Android sharing, real keyboard/rotation, stable filter thumbnails, saved-share retry fault recovery and image-relative 12MP captions. No message was sent.'};(ROOT/'runtime-report.json').write_text(json.dumps(report,indent=2));(ROOT/'runtime-progress.json').write_text(json.dumps({'status':'passed','apkSha256':digest,'packageId':PKG,'cases':cases},indent=2));print('All native regression checks passed.',flush=True)
