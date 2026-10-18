@@ -179,11 +179,11 @@ test('a signalled native process stops as a harness failure without app repair',
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
 });
 
-test('legacy null-exit native interruption retries source without generating app changes', async () => {
+for (const legacyMessage of ['Actual Android UI checks failed (null). PASS launch', 'Actual Android UI checks failed (1).\nRuntimeError: Tool not reachable: Text and stickers']) test(`legacy native harness failure retries source without app generation: ${legacyMessage.split('\n').at(-1)}`, async () => {
   const setup = await fixture(true), previous = process.env.MELD_CLAUDE_BIN;
   process.env.MELD_CLAUDE_BIN = setup.cli;
   try {
-    await write(path.join(path.dirname(setup.directory), setup.input.project.latestBuild!.id, 'failure.json'), { stage: 'native', issues: ['Actual Android UI checks failed (null). PASS launch'] });
+    await write(path.join(path.dirname(setup.directory), setup.input.project.latestBuild!.id, 'failure.json'), { stage: 'native', issues: [legacyMessage] });
     await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'model_output' });
     const first = JSON.parse((await readFile(setup.calls, 'utf8')).trim().split('\n')[0]);
     expect(first.schema.properties.passed).toBeDefined();

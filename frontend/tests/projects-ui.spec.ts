@@ -8,9 +8,23 @@ import type { ProjectTestServer } from "./project-fixtures";
 async function connect(page: Page, api: ProjectTestServer) {
   await page.route("**/api/**", async route => {
     const request = route.request(), url = new URL(request.url());
-    const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined });
-    await route.fulfill({ response });
+    try {
+      const response = await page.request.fetch(api.address + url.pathname + url.search, { method: request.method(), headers: { "Content-Type": "application/json", Origin: api.address }, data: request.postData() || undefined });
+      await route.fulfill({ response });
+    } catch (error) {
+      // Reload/teardown may cancel a route while its forwarded response is in
+      // flight. Other forwarding failures remain visible to the test.
+      const cancelled = page.isClosed() || request.failure()?.errorText === "net::ERR_ABORTED" || String(error).includes("Route is already handled");
+      if (!cancelled) throw error;
+    }
   });
+}
+async function disconnect(page: Page, api: ProjectTestServer) {
+  // Stop background polling before removing fixture routes. Cancelled reload
+  // routes may never settle Playwright's internal handled promise.
+  await page.close().catch(() => undefined);
+  await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => undefined);
+  await api.close();
 }
 async function openReferences(page: Page, api: ProjectTestServer) {
   const saved = await api.service.create({ requestKey: randomUUID(), brief: idea });
@@ -60,7 +74,7 @@ test("saved references → human choices → design → selective change → APK
     await page.reload(); await expect(page.getByRole("heading", { name: "Your Android app is ready." })).toBeVisible();
     const download = page.waitForEvent("download"); await page.getByRole("link", { name: "Download Android app" }).click(); expect((await download).suggestedFilename()).toBe("app.apk");
     const delivered = await api.service.get(id); expect(delivered.latestBuild!.revision).toBe(delivered.currentDesignRevision); expect(api.counts()).toEqual({ analysisCalls: 2, buildCalls: 1 });
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });
 test("free text, clarification, dismiss and restore stay in one review workspace", async ({ page }) => {
   test.setTimeout(60000);
@@ -72,7 +86,7 @@ test("free text, clarification, dismiss and restore stay in one review workspace
     await page.getByRole("button", { name: "Dismiss suggestions" }).click(); await page.getByLabel("What would you like to change?").fill("unrelated"); await page.getByRole("button", { name: "Review suggested changes" }).click(); await expect(page.getByRole("heading", { name: "Your design is unchanged." })).toBeVisible();
     await page.getByRole("button", { name: "Dismiss suggestions" }).click(); await page.getByLabel("What would you like to change?").fill("change"); await page.getByRole("button", { name: "Review suggested changes" }).click(); await page.getByRole("button", { name: "Confirm selected changes" }).click(); await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
     await page.getByText("Design history and development files", { exact: true }).click(); await page.getByRole("button", { name: "Version history", exact: true }).click(); page.once("dialog", dialog => dialog.accept()); await page.getByRole("button", { name: "Restore", exact: true }).click(); await expect(page.getByText("Version 3", { exact: true })).toBeVisible();
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });
 test("missing APKs continue to the design while progress stays concise across reload", async ({ page }) => {
   test.setTimeout(60000); const api = await projectServer({ apks: false });
@@ -85,7 +99,7 @@ test("missing APKs continue to the design while progress stays concise across re
     await page.reload(); await expect(page.getByRole("heading", { name: "A few choices shape your app." })).toBeVisible();
     await page.getByRole("button", { name: "Use these choices" }).click(); await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible();
     await expect(page.getByRole("link", { name: "Download Android app" })).toHaveCount(0); expect(api.counts().analysisCalls).toBe(2);
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });
 for (const width of [320, 390, 1440]) test(`new workspace is accessible and fits at ${width}px`, async ({ page }) => {
   test.setTimeout(60000);
@@ -96,7 +110,7 @@ for (const width of [320, 390, 1440]) test(`new workspace is accessible and fits
     await page.getByRole("button", { name: "Try the Notes example" }).click(); await expect(page.getByRole("heading", { name: "Your app, in plain language." })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });
 
 
@@ -123,7 +137,7 @@ for (const width of [390, 1440]) test(`reference cards, screenshots and feature 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
     expect(api.counts().analysisCalls).toBe(0);
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });
 
 test("choose exactly one foundation, keep additions, and restore the selection after reload", async ({ page }) => {
@@ -143,5 +157,5 @@ test("choose exactly one foundation, keep additions, and restore the selection a
     expect(chosen).toBeTruthy(); expect(Object.values(saved.featurePreferences.selections).flat()).toHaveLength(1);
     await page.reload(); await expect(page.locator(".studio-base-summary")).toContainText(names[2]);
     expect((await api.service.get(id)).featurePreferences.baseAppId).toBe(chosen);
-  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await api.close(); }
+  } finally { await disconnect(page, api); }
 });

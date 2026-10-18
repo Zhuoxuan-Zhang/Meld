@@ -16,6 +16,20 @@ def keyboard_content_top(windows):
     if frame and inset:return int(frame[2])+int(inset[1])
   raise RuntimeError('Visible keyboard frame/insets unavailable')
 
+
+def system_content_bottom(displays,width,height):
+  """Visible system insets, not a guessed portrait margin, bound touch Y."""
+  if 'InsetsSource' not in displays:return None
+  bottom=height
+  for line in displays.splitlines():
+    if 'InsetsSource' not in line or 'visible=true' not in line:continue
+    if not any(kind in line for kind in ['ITYPE_NAVIGATION_BAR','ITYPE_BOTTOM_MANDATORY_GESTURES','ITYPE_BOTTOM_TAPPABLE_ELEMENT','type=navigationBars']):continue
+    frame=re.search(r'frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]',line)
+    if not frame:continue
+    left,top,right,end=map(int,frame.groups())
+    if right-left>=width*.5 and 0<top<height and end>=height:bottom=min(bottom,top)
+  return bottom
+
 def verify(h):
   n=h['n'];bounds=h['bounds'];pkg=h['PKG'];folder=h['ROOT'];digest=h['digest']
   cases=[];issues=[];metrics={}
@@ -29,7 +43,10 @@ def verify(h):
    n.adb('shell','am','force-stop',pkg);n.adb('shell','am','start','-W','-f','0x10008000','-n',pkg+'/generated.MainActivity');h['wait_label'](lambda x:x=='Choose photo');n.tap('Choose photo');time.sleep(1);h['select_photo'](filename);h['mode_editor']()
   def safe_bottom(current,tap=False):
    values=re.findall(r'(?:Physical|Override) density:\s*(\d+)',n.adb('shell','wm','density').decode());density=int(values[-1]) if values else 160
-   bottom=max((bounds(x)[3] for x in current.iter('node') if len(bounds(x))==4),default=960)-round((24 if tap else 48)*density/160)
+   height=max((bounds(x)[3] for x in current.iter('node') if len(bounds(x))==4),default=960)
+   width=max((bounds(x)[2] for x in current.iter('node') if len(bounds(x))==4),default=480)
+   bottom=system_content_bottom(n.adb('shell','dumpsys','window','displays').decode(),width,height)
+   if bottom is None:bottom=height-round((24 if tap else 48)*density/160)
    ime=n.adb('shell','dumpsys','input_method').decode()
    if 'mInputShown=true' in ime:
     bottom=min(bottom,keyboard_content_top(n.adb('shell','dumpsys','window','windows').decode()))
@@ -40,13 +57,13 @@ def verify(h):
     controls=[x for x in current.iter('node') if name in [x.get('text'),x.get('content-desc')] and x.get('enabled')=='true' and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>=20 and (bounds(x)[1]+bounds(x)[3])//2<safe_bottom(current,True)]
     if controls:tap_node(controls[0]);return
     owners=[x for x in current.iter('node') if x.get('scrollable')=='true' and x.get('package')==pkg and len(bounds(x))==4 and bounds(x)[3]-bounds(x)[1]>30]
-    if not owners:raise RuntimeError('No scroll owner for '+name)
+    if not owners:raise h['HarnessSelectorError']('No scroll owner for '+name)
     b=bounds(max(owners,key=lambda x:bounds(x)[3]-bounds(x)[1]))
     if b[2]-b[0]>2*(b[3]-b[1]) and b[3]-b[1]<200:
      n.adb('shell','input','swipe',str(b[2]-10),str((b[1]+b[3])//2),str(b[0]+10),str((b[1]+b[3])//2),'350')
     else:
      bottom=min(b[3],safe_bottom(current));start=bottom-12;end=max(b[1]+12,int(start-min(240,(bottom-b[1])*.45)));n.adb('shell','input','swipe',str(b[0]+36),str(start),str(b[0]+36),str(end),'350')
-   raise RuntimeError('Tool not reachable: '+name)
+   raise h['HarnessSelectorError']('Tool not reachable: '+name)
   def edit_text(value):
    for _ in range(10):
     found=[x for x in n.tree().iter('node') if x.get('class')=='android.widget.EditText' and len(bounds(x))==4 and bounds(x)[3]>bounds(x)[1]]

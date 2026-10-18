@@ -76,6 +76,11 @@ spec=importlib.util.spec_from_file_location('checks',sys.argv[1]);checks=importl
 for frame,inset,expected in [(36,571,607),(0,200,200),(24,300,324)]:
  dump=f"  Window #5 Window{{123 u0 InputMethod}}:\n    mGivenContentInsets=[0,{inset}][0,0]\n    Frames: parent=[0,{frame}][480,960] frame=[0,{frame}][480,960]\n  Window #6 Window{{456 u0 app}}:"
  assert checks.keyboard_content_top(dump)==expected
+assert checks.system_content_bottom('InsetsSource type=ITYPE_STATUS_BAR frame=[0,0][960,36] visible=true',960,480)==480
+assert checks.system_content_bottom('InsetsSource type=ITYPE_NAVIGATION_BAR frame=[0,924][480,960] visible=true',480,960)==924
+assert checks.system_content_bottom('InsetsSource type=ITYPE_NAVIGATION_BAR frame=[924,0][960,480] visible=true',960,480)==480
+assert checks.system_content_bottom('InsetsSource type=ITYPE_NAVIGATION_BAR frame=[0,444][960,480] visible=false',960,480)==480
+assert checks.system_content_bottom('unknown display format',960,480) is None
 try:checks.keyboard_content_top('No keyboard frame')
 except RuntimeError:pass
 else:raise AssertionError('Unknown IME layout must not invent a coordinate')
