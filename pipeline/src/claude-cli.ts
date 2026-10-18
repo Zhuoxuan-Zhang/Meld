@@ -4,10 +4,16 @@ import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { write, redact, trackOwnedProcess } from './storage.js';
 
+// Claude Code validates --json-schema with a Draft 7 validator. Generate that
+// dialect, including its tuple/ref syntax, rather than removing the dialect tag.
+export function claudeJsonSchema(schema: z.ZodType<any>) {
+  return z.toJSONSchema(schema, { target: 'draft-7' });
+}
+
 export function parseClaudeCli(response: any, schema: z.ZodType<any>, outputLimit: number) {
   if (response.execution.code !== 0 || !response.turn_completed || response.errors.length) throw new Error(`Incomplete Claude Code execution: ${response.errors.join('; ') || response.execution.code}`);
   if (response.tool_activity) throw new Error('Claude Code used a tool outside the pipeline evidence interface');
-  if (response.usage.output_tokens > outputLimit) throw new Error('Claude Code output exceeded the post-response token limit');
+  if (response.usage?.output_tokens > outputLimit) throw new Error('Claude Code output exceeded the post-response token limit');
   return schema.parse(JSON.parse(response.final_text));
 }
 
@@ -68,6 +74,7 @@ export async function executeClaudeCli(dir: string, request: any, timeout: numbe
     try { result = images.length ? stdout.split('\n').filter(Boolean).map(line => JSON.parse(line)).reverse().find(event => event.type === 'result') : JSON.parse(stdout); } catch { /* reported below */ }
     const errors: string[] = [];
     if (execution.timedOut || execution.exceeded) errors.push(`CLI stopped: timeout=${execution.timedOut}, output_limit=${execution.exceeded}`);
+    if (execution.code !== 0 && stderr.trim()) errors.push(redact(stderr.trim()).slice(0, 4000));
     if (!result) errors.push('Claude Code CLI did not return a parseable JSON result');
     else if (result.is_error) errors.push(redact(JSON.stringify(result.result ?? result)));
     else if (result.structured_output === undefined) errors.push('Claude Code CLI result did not include structured_output');

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fs } from 'node:fs';
-import { ObservationPlan, collectObservation, compareObservations, loadReferenceObservations, prepareReferenceObservations, selectTap, uiNodes, validateObservation } from '../src/observation.js';
+import { ObservationPlan, checkedLauncherComponent, collectObservation, compareObservations, loadReferenceObservations, prepareReferenceObservations, selectTap, uiNodes, validateObservation } from '../src/observation.js';
 import { validateInvestigationScope } from '../src/investigation-client.js';
 import { sha, write, fileSha } from '../src/storage.js';
 import { validateRun } from '../src/validate.js';
@@ -180,4 +180,20 @@ describe('original/candidate comparison policy', () => {
     const original = await fixture('reference'), candidate = await fixture('candidate');
     await expect(compareObservations(candidate.dir, original.dir, path.join(root, 'comparison'), vision, {})).rejects.toThrow('original reference');
   });
+});
+
+
+it('resets only a validated launcher component in the observed package', () => {
+  expect(checkedLauncherComponent('com.example.photo/.MainActivity\n', 'com.example.photo')).toBe('com.example.photo/.MainActivity');
+  expect(() => checkedLauncherComponent('com.other.app/.MainActivity', 'com.example.photo')).toThrow('planned package');
+  expect(() => checkedLauncherComponent('com.example.photo/.MainActivity;id', 'com.example.photo')).toThrow('planned package');
+  expect(() => checkedLauncherComponent('com.example.photo/.MainActivity\ncom.example.photo/.Other', 'com.example.photo')).toThrow('planned package');
+});
+
+
+it('selects a bounded point within a unique picker node without entering its preview affordance', () => {
+  const xml = '<hierarchy><node text="photo" bounds="[20,100][120,200]"/></hierarchy>';
+  expect(selectTap(xml, { text: 'photo' }, [0.1, 0.9])).toEqual([30, 190]);
+  expect(selectTap(xml, { text: 'photo' }, [1, 1])).toEqual([119, 199]);
+  expect(() => selectTap(xml, { text: 'photo' }, [-1, 0.5])).toThrow('inside');
 });

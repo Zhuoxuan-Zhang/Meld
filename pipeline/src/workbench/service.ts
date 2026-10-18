@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Review } from '../schemas.js';
 import { exists, fileSha, json, write } from '../storage.js';
-import { ChangePlan, UserDocument, RevisionData, type ChangePlanT, type RevisionDataT, type UserDocumentT, type ChangeRequestT, type ApplyRequestT } from './schemas.js';
+import { ChangePlan, UserDocument, readableDocumentSchema, RevisionData, type ChangePlanT, type RevisionDataT, type UserDocumentT, type ChangeRequestT, type ApplyRequestT } from './schemas.js';
 import { applyOperations, controls, describeEdits, planErrors, selectedOperations } from './changes.js';
 import { DesignStore, withLock, type RevisionRecord } from './store.js';
 import { LiveDesignModel, type DesignModel } from './model.js';
@@ -34,8 +34,9 @@ export class DesignService {
   }
   async explain(id: string, data: RevisionDataT) {
     let repair: any = null;
+    const schema = readableDocumentSchema(data.decisions);
     for (let attempt = 0; attempt < 3; attempt++) {
-      const document = await this.ask(id, 'workbench-explain', await this.prompt('explain'), { detailed_design: data.design, brief: data.brief, decisions: data.decisions, repair }, UserDocument, value => readableErrors(value, data));
+      const document = await this.ask(id, 'workbench-explain', await this.prompt('explain'), { detailed_design: data.design, brief: data.brief, decisions: data.decisions, allowed_choice_ids: data.decisions.selections.map(choice => choice.conflict_id), repair }, schema, value => readableErrors(value, data));
       const review = await this.review(id, { kind: 'explanation', detailed_design: data.design, brief: data.brief, decisions: data.decisions, user_document: document });
       if (review.passed && !review.issues.some(i => i.severity === 'blocking')) return { document, review };
       repair = { prior_document: document, review };

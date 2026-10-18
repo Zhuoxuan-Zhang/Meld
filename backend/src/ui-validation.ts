@@ -2,7 +2,7 @@ import path from 'node:path';
 import { z, json, fileSha, write, collectObservation, compareObservations, ObservationPlan, ObservationVision, observationDesignContext, validateObservation, pipelineRoot, WorkbenchError } from '../../pipeline/dist/src/integration.js';
 
 const Entry = z.object({
-  referenceDirectory: z.string().min(1), serial: z.string().min(1),
+  referenceDirectory: z.string().min(1), serial: z.string().min(1), resetTask: z.boolean().optional(),
   scenarios: ObservationPlan.shape.scenarios,
   vision: ObservationVision,
 }).strict();
@@ -27,7 +27,7 @@ export async function uiReferenceContext(entry: UiValidationEntry) {
 export async function validateBuiltUi(entry: UiValidationEntry, apk: string, packageName: string, directory: string, approvedDesign: unknown, referenceManifestSha256?: string) {
   if (referenceManifestSha256 && await fileSha(path.join(entry.referenceDirectory, 'manifest.json')) !== referenceManifestSha256) throw new WorkbenchError('ui_reference_changed', 'The original UI reference changed during this build. Start a new build with the intended reference.', 409);
   const observed = await collectObservation(path.resolve(process.env.MELD_PIPELINE_TOOL_ROOT || pipelineRoot), path.join(directory, 'candidate'), {
-    packageName, apk, role: 'candidate', serial: entry.serial, install: true, scenarios: entry.scenarios,
+    packageName, apk, role: 'candidate', serial: entry.serial, install: true, resetTask: entry.resetTask, scenarios: entry.scenarios,
   });
   if (observed.apkSha256 !== await fileSha(apk)) throw new WorkbenchError('ui_apk_changed', 'UI observations do not match this build APK.', 422);
   const result = await compareObservations(entry.referenceDirectory, path.join(directory, 'candidate'), path.join(directory, 'comparison'), entry.vision, approvedDesign);

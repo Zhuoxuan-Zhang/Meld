@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
   const claudeBinary = claude.locate();
   if (claudeBinary) process.env.MELD_CLAUDE_BIN = claudeBinary;
   if (claude.env.CLAUDE_CONFIG_DIR) process.env.CLAUDE_CONFIG_DIR = claude.env.CLAUDE_CONFIG_DIR;
+  for (const key of ["MELD_BUILD_PROVIDER", "MELD_CODEX_BUILD_MODEL", "MELD_CLAUDE_BUILD_MODEL"]) if (env[key]) process.env[key] = env[key];
   return {
     plugins: [
       react(),
@@ -29,6 +30,10 @@ export default defineConfig(({ mode }) => {
       designApi({ root: path.join(cache, "designs"), signals, pipeline: { directory: path.join(cache, "pipeline-jobs"), apkDir: env.MELD_APK_DIR || path.join(cache, "apks"), toolRoot: env.MELD_PIPELINE_TOOL_ROOT, config: env.MELD_PIPELINE_CONFIG, observationConfig: env.MELD_REA_OBSERVATION_CONFIG }, exampleId: env.MELD_DESIGN_EXAMPLE }),
       claudeApi(claude),
     ],
-    server: { watch: { ignored: ["**/.meld-cache/**", "**/test-results/**", "**/playwright-report/**"] } },
+    // Compile output is imported by the server configuration. Watching each
+    // emitted module causes overlapping restarts and permanent 504 responses.
+    // Restart the launcher explicitly after changing backend implementation.
+    optimizeDeps: { entries: ["index.html"] },
+    server: { watch: { ignored: ["**/.meld-cache/**", "**/test-results/**", "**/playwright-report/**", "**/pipeline/dist/**"] } },
   };
 });

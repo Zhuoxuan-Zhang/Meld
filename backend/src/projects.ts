@@ -1,8 +1,9 @@
+import { currentWorker, workerIsAlive, type WorkerOwner } from "./worker";
 import { assessFit } from "../../frontend/src/feasibility";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DesignService, z, json, write, exists, withLock, semanticHash, WorkbenchError, ChangeRequest, ApplyRequest, RestoreRequest } from "../../pipeline/dist/src/integration.js";
+import { DesignService, z, json, write, exists, withLock, semanticHash, fileSha, WorkbenchError, ChangeRequest, ApplyRequest, RestoreRequest } from "../../pipeline/dist/src/integration.js";
 import type { BrowserEmulator } from "./emulator";
 import { PipelineJobs, DesignInput } from "./adapters/pipeline";
 import type { PipelineOptions } from "./adapters/pipeline";
@@ -23,8 +24,8 @@ export const ChangeAction = Action.extend({ baseRevision: key, text: z.string().
 export const ConfirmAction = Action.extend({ baseRevision: key.optional(), selectedChangeIds: z.array(key).max(8).optional(), selections: z.array(z.object({ conflict_id: z.string().min(1).max(96), option_id: z.string().min(1).max(96) }).strict()).max(30).optional() });
 export const RestoreAction = Action.extend({ baseRevision: key, targetRevision: key });
 export const OutlinePatch = z.object({ expectedVersion: z.number().int().positive(), baseRevision: key, document: HighLevelDocument }).strict();
-export const BuildAction = Action.extend({ revision: key });
-type StoredJob = Job & { projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
+export const BuildAction = Action.extend({ revision: key, feedback: z.object({ buildId: key, description: z.string().trim().min(1).max(3000) }).strict().optional() });
+type StoredJob = Job & { worker?: WorkerOwner; projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
 export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; prepareReferences?: boolean; emulator?: BrowserEmulator; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
@@ -134,7 +135,7 @@ export class ProjectService {
     try { return await json(this.jobFile(id)); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new WorkbenchError("not_found", "This task was not found.", 404); throw error; }
   }
   async saveJob(job: StoredJob) { job.updatedAt = new Date().toISOString(); await write(this.jobFile(job.id), job); }
-  async job(id: string): Promise<Job> { const stored = await this.storedJob(id); if (stored.pipelineJobId && !["succeeded", "failed"].includes(stored.status)) { const current = await this.pipeline.get(stored.pipelineJobId); stored.progress = current.progress; stored.phase = current.phase; } const { request: _request, signature: _signature, projectVersion: _version, pipelineJobId: _pipeline, internalJobId: _internal, ...job } = stored; let resumable = false; if (stored.status === "failed" && stored.pipelineJobId) { const project = await this.raw(stored.projectId); resumable = ["detail", "design"].includes(stored.type) && !project.activeJobId && project.lastJobId === id && project.version === stored.projectVersion + 1; } return { ...job, resumable }; }
+  async job(id: string): Promise<Job> { const stored = await this.storedJob(id); if (stored.pipelineJobId && !["succeeded", "failed"].includes(stored.status)) { const current = await this.pipeline.get(stored.pipelineJobId); stored.progress = current.progress; stored.phase = current.phase; } const { request: _request, signature: _signature, projectVersion: _version, pipelineJobId: _pipeline, internalJobId: _internal, worker: _worker, ...job } = stored; let resumable = false; if (stored.status === "failed" && stored.pipelineJobId) { const project = await this.raw(stored.projectId); resumable = ["detail", "design"].includes(stored.type) && !project.activeJobId && project.lastJobId === id && project.version === stored.projectVersion + 1; } return { ...job, resumable }; }
   launch(work: () => Promise<void>) { const task = Promise.resolve().then(work); this.tasks.add(task); void task.finally(() => this.tasks.delete(task)).catch(() => undefined); }
   async idle() { while (this.tasks.size) await Promise.allSettled([...this.tasks]); await this.pipeline.idle(); }
   async start(id: string, type: Job["type"], input: z.infer<typeof Action> & Record<string, unknown>, work: (job: StoredJob) => Promise<void>) {
@@ -142,7 +143,7 @@ export class ProjectService {
     return withLock(`${file}.lock`, async () => {
       const index = await exists(file) ? await json(file) : {}, indexKey = `${id}:${input.requestKey}`, signature = semanticHash({ type, input });
       if (index[indexKey]) { if (index[indexKey].signature !== signature) throw new WorkbenchError("idempotency_conflict", "This request key was used for different choices.", 409); return this.job(index[indexKey].id); }
-      const now = new Date().toISOString(), job: StoredJob = { id: `job-${randomUUID()}`, projectId: id, type, status: "queued", phase: "Preparing your app…", createdAt: now, updatedAt: now, projectVersion: 0, request: input, signature };
+      const now = new Date().toISOString(), job: StoredJob = { id: `job-${randomUUID()}`, projectId: id, type, status: "queued", phase: "Preparing your app…", createdAt: now, updatedAt: now, projectVersion: 0, worker: currentWorker(), request: input, signature };
       await this.mutate(id, async project => {
         if (project.activeJobId) { const active = await this.storedJob(project.activeJobId); if (["queued", "running", "waiting_inputs", "waiting_user"].includes(active.status)) throw new WorkbenchError("busy", "Finish or resume the current step before starting another.", 409); }
         project.version++; project.activeJobId = job.id; project.lastJobId = job.id; job.projectVersion = project.version; await this.saveJob(job);
@@ -151,7 +152,11 @@ export class ProjectService {
       this.launch(() => this.run(job, work)); return this.job(job.id);
     }, 2000);
   }
-  async progress(job: StoredJob, phase: string) { job.phase = phase; await this.saveJob(job); }
+  async progress(job: StoredJob, phase: string) {
+    const project = await this.raw(job.projectId);
+    if (project.activeJobId !== job.id || project.version !== job.projectVersion) throw new WorkbenchError("stale_project", "This task was replaced or interrupted. Continue from the current project step.", 409);
+    job.phase = phase; await this.saveJob(job);
+  }
   async publish(job: StoredJob, work: (project: Project) => void | Promise<void>) {
     return this.mutate(job.projectId, async project => {
       if (project.version !== job.projectVersion || project.activeJobId !== job.id) throw new WorkbenchError("stale_project", "The project changed while this task was running.", 409);
@@ -163,7 +168,7 @@ export class ProjectService {
     job.status = "succeeded"; job.phase = "Ready."; await this.saveJob(job);
   }
   async run(job: StoredJob, work: (job: StoredJob) => Promise<void>) {
-    job.status = "running"; await this.saveJob(job);
+    job.worker = currentWorker(); job.status = "running"; await this.saveJob(job);
     try { await work(job); }
     catch (error) {
       job.status = "failed"; job.error = { code: (error as WorkbenchError).code || "task_failed", message: (error as Error).message }; await this.saveJob(job);
@@ -368,6 +373,19 @@ export class ProjectService {
       const buildInput = await this.buildInput(id, input.revision);
       const directory = path.join(this.options.directory, "builds", job.id);
       await write(path.join(directory, "input.json"), { ...buildInput, projectProfile: project.brief });
+      if (input.feedback) {
+        const delivered = project.latestBuild?.status === "succeeded" ? project.latestBuild : project.lastDeliveredBuild;
+        if (!delivered || delivered.id !== input.feedback.buildId || delivered.revision !== input.revision || delivered.designHash !== buildInput.designHash) throw new WorkbenchError("stale_build", "Report a problem with the app built from your current design. Reload the project before continuing.", 409);
+        const owner = await this.storedJob(delivered.id);
+        if (owner.projectId !== id || owner.type !== "build" || owner.status !== "succeeded") throw new WorkbenchError("stale_build", "This app build is not available for repair.", 409);
+        const artifact = delivered.artifacts.find(item => item.name.endsWith(".apk"));
+        if (!artifact || path.basename(artifact.name) !== artifact.name) throw new WorkbenchError("artifact_missing", "The app download is unavailable. Build the app again.", 409);
+        const previousDirectory = path.join(this.options.directory, "builds", delivered.id), apk = path.join(previousDirectory, "artifacts", artifact.name);
+        if ((await fs.lstat(apk)).isSymbolicLink() || await fileSha(apk) !== artifact.sha256) throw new WorkbenchError("artifact_changed", "The app download changed. Build the app again before requesting a repair.", 409);
+        const findings = { apkSha256: artifact.sha256, issues: [input.feedback.description] };
+        await write(path.join(previousDirectory, "runtime-findings.json"), findings);
+        await write(path.join(directory, "user-feedback.json"), { sourceBuildId: delivered.id, ...findings });
+      }
       await this.publish(job, p => { p.approvedRevision = input.revision; p.latestBuild = { id: job.id, revision: input.revision, designHash: buildInput.designHash, status: "running", artifacts: [] }; });
       if (!this.options.build) throw new WorkbenchError("build_unavailable", "The Android build environment is not configured.", 503);
       const result = await this.options.build({ project, revision: input.revision, design: buildInput, designHash: buildInput.designHash, directory, progress: phase => this.progress(job, phase) });
@@ -385,7 +403,7 @@ export class ProjectService {
     const dir = path.join(this.options.directory, "jobs"); await fs.mkdir(dir, { recursive: true });
     for (const name of await fs.readdir(dir)) {
       if (!/^job-[a-f\d-]{36}\.json$/.test(name)) continue; const job = await this.storedJob(name.slice(0, -5));
-      if (!["running", "queued"].includes(job.status)) continue;
+      if (!["running", "queued"].includes(job.status) || workerIsAlive(job.worker)) continue;
       if (job.pipelineJobId) { this.launch(() => this.run(job, j => this.watchPipeline(j))); continue; }
       // Reconcile an already-published project before marking an unfinished task failed.
       const project = await this.raw(job.projectId);

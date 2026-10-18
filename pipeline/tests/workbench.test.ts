@@ -14,7 +14,7 @@ it('checks descriptive color roles using their token names', () => {
   colors[0].value = '#EEEEEE';
   expect(paletteErrors(colors)).toEqual(['Insufficient contrast primary/onPrimary']);
 });
-import { RevisionData, UserDocument, ChangeRequest } from '../src/workbench/schemas.js';
+import { RevisionData, UserDocument, ChangeRequest, readableDocumentSchema } from '../src/workbench/schemas.js';
 import { json, write } from '../src/storage.js';
 import { comparison, fixtureData, fixturePlan, FixtureModel, op, readable, sourceFixture } from './fixtures/workbench.js';
 
@@ -27,6 +27,21 @@ beforeEach(async () => {
 afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const request = (text = 'change') => ChangeRequest.parse({ base_revision: initial.revision, idempotency_key: randomUUID(), text });
 describe('interactive design boundaries and revision safety (synthetic models)', () => {
+  it('constrains readable choices to real developer decisions, including an empty decision set', () => {
+    const data = fixtureData(), document = UserDocument.parse(readable(data));
+    expect(readableDocumentSchema(data.decisions).safeParse(document).success).toBe(true);
+    const invented = structuredClone(document);
+    invented.choices[0].id = 'smallest-core';
+    expect(readableDocumentSchema(data.decisions).safeParse(invented).success).toBe(false);
+    const wrongLink = structuredClone(document);
+    wrongLink.choices[0].refs = [{ kind: 'decision', id: data.decisions.selections[0].option_id }];
+    expect(readableDocumentSchema(data.decisions).safeParse(wrongLink).success).toBe(false);
+    data.decisions.selections = [];
+    const schema = readableDocumentSchema(data.decisions);
+    expect(schema.safeParse(invented).success).toBe(false);
+    expect(schema.safeParse({ ...document, choices: [] }).success).toBe(true);
+    expect(readableErrors({ ...document, choices: [] }, data)).toEqual([]);
+  });
   it('requires complete readable coverage and resolvable references', () => {
     const data = fixtureData(); const doc = UserDocument.parse(readable(data)); expect(readableErrors(doc, data)).toEqual([]);
     doc.features[0].refs[0].id = 'missing'; expect(readableErrors(doc, data).join()).toContain('Unknown developer reference');

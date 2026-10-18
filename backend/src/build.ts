@@ -4,15 +4,49 @@ import { spawn } from "node:child_process";
 import { z, write, fileSha, exists, json, WorkbenchError, checkApk } from "../../pipeline/dist/src/integration.js";
 import { buildModelJson as modelJson } from "./model";
 import { sha } from "../../pipeline/dist/src/storage.js";
-import { generateSources, SourceFiles, recoverCompletedBatch, recoverRepairPrefix } from "./codegen";
+import { generateSources, SourceFiles, recoverCompletedBatch, recoverRepairPrefix, removeSourceFiles } from "./codegen";
 import type { BuildRunner } from "./projects";
 import { uiValidationEntry, uiReferenceContext, validateBuiltUi } from "./ui-validation";
+import type { Project } from "../../shared/contracts";
 
 export type AndroidEnvironment = { sdk: string; javaHome: string; templateDirectory: string; uiValidationConfig?: string; nativeSmoke?: { projectId: string; script: string; adb: string; serial: string; output: string } };
 const Files = SourceFiles;
-const isHarnessFailure = (message: string) => /\n(?:TypeError|FileNotFoundError|ModuleNotFoundError|subprocess\.CalledProcessError):/.test(message) || message.startsWith("Native harness");
+const productRequirements = " When approvedOutline is supplied, it is the user's authoritative product scope. Preserve every explicit operation in its feature steps, even if the detailed design compresses it into a word such as manage. Adding, editing, checking and deleting are separate operations. A missing requested operation is blocking. Trace each required control through the actual navigation host, state owner and persistence layer; no-op callback defaults do not implement a feature. When a shared signature changes, update every caller and entry-point connection. Ensure a new workflow can start without accidentally editing the previous completed record. Use one vertical scrolling owner or explicitly bound nested scrolling containers; never put an unbounded LazyColumn inside a verticalScroll Column. Every saved list row must remain reachable through scrolling. If a lazy list is replaced by a plain Column, remove stale height caps that truncate its rows. Keep form fields and Save/Cancel controls reachable with the keyboard open and in landscape. For modal forms, apply keyboard avoidance at the dialog or editor root, not only the AlertDialog text slot while its title and buttons remain under the keyboard. When height is short, the entire form including heading and actions must remain reachable through scrolling or a compact full-screen editor; do not reserve a fixed heading/footer that leaves zero height for input. Programmatic focus must target an attached control in its actual dialog composition; do not request focus from an outer effect before dialog content mounts. Optional autofocus must never crash or clear input during rotation. ";
+export function approvedOutlineForBuild(project: Pick<Project, "highLevelDesign">, revision: string) {
+  const outline = project.highLevelDesign;
+  if (!outline || outline.approvedRevision !== outline.revision || outline.developerRevision !== revision) return null;
+  return { revision: outline.revision, document: outline.document };
+}
+const runtimeAcceptanceRequirements = "Primary visual features must be visibly implemented with suitable local Canvas/vector/icon artwork, not empty colored shapes or labels standing in for the promised object. Preserve terminal success/failure results long enough for the user to see them and start the next action. For timed workflows, distinguish activity recreation/rotation, internal navigation, screen sleep/lock, and deliberately leaving the app. Do not treat every onStop as abandonment. Use current device state rather than a stale lock flag, preserve durable timestamps, and reconcile elapsed time on return. Keep one active timer and use atomic, idempotent result persistence. Apply Scaffold/system/IME insets to the actual content; keep essential actions reachable on a small screen and in landscape. Account for keyboard space once across the Activity window policy, Scaffold and screen modifiers. Consume applied padding/insets consistently: ordinary Modifier.padding(innerPadding) does NOT consume Scaffold insets. When following it with imePadding(), use consumeWindowInsets(innerPadding) after padding(innerPadding), so the keyboard and bottom navigation padding are not added twice. Check that landscape with the keyboard open still has a nonzero, usable scroll viewport. Keep the focused field visible in the actual scroll viewport after the keyboard opens; a tiny viewport above a large empty gap is a blocking layout defect. Add meaningful tests for the relevant transitions. Tests must import and exercise production domain logic, using injected platform ports where needed. Reimplementing an exporter or coordinator in test-only stand-in classes does not test the app and must be replaced. A concurrency regression test must deterministically overlap the contested operations at their read/write boundary; async calls with non-suspending fakes on one dispatcher only test sequential behavior. Where practical, verify the regression test distinguishes the old unsafe behavior from the fix. Static tests do not establish device behavior.";
+const isHarnessFailure = (message: string) => /\n(?:TypeError|FileNotFoundError|ModuleNotFoundError|HarnessSelectorError|subprocess\.CalledProcessError):/.test(message) || message.startsWith("Native harness");
 export function implementationReviewPassed(review: { passed: boolean; issues: string[] }) {
   return review.passed && !review.issues.some(issue => /^\[blocking\]/i.test(issue));
+}
+export async function readRuntimeFeedback(root: string, startingId: string | undefined, expected: { projectId: string; revision: string; designHash: string }) {
+  const seen = new Set<string>();
+  let id = startingId;
+  for (let depth = 0; id && depth < 8 && !seen.has(id); depth++) {
+    if (!/^job-[a-f\d-]{36}$/.test(id)) break;
+    seen.add(id);
+    const directory = path.join(root, id), inputFile = path.join(directory, "input.json");
+    if (!(await exists(inputFile))) break;
+    const saved = await json(inputFile);
+    if (saved.projectId !== expected.projectId || saved.revision !== expected.revision || saved.designHash !== expected.designHash) break;
+    const feedback = path.join(directory, "runtime-findings.json");
+    if (await exists(feedback)) {
+      const findings = z.object({ apkSha256: z.string().regex(/^[a-f\d]{64}$/), issues: z.array(z.string().max(3000)).min(1).max(20) }).strict().parse(await json(feedback));
+      const deliveredApk = path.join(directory, "artifacts/app.apk");
+      const apk = await exists(deliveredApk) ? deliveredApk : path.join(directory, "source/app/build/outputs/apk/debug/app-debug.apk");
+      if (!(await exists(apk)) || await fileSha(apk) !== findings.apkSha256) throw new WorkbenchError("stale_runtime_feedback", "Runtime findings do not match the tested APK. Test the current build before retrying.", 409);
+      return { previousBuildId: id, ...findings };
+    }
+    // A successful delivery already incorporated its parent's findings. Only
+    // unfinished retries need to follow their source back to the tested APK.
+    if (await exists(path.join(directory, "artifacts.json"))) break;
+    const retry = path.join(directory, "retry-source.json"), update = path.join(directory, "update-source.json");
+    id = await exists(retry) ? (await json(retry)).previousBuildId : await exists(update) ? (await json(update)).previousBuildId : undefined;
+  }
+  return null;
 }
 const Review = z.object({ passed: z.boolean(), issues: z.array(z.string().max(1200)).max(20), acceptanceTests: z.array(z.string().max(1200)).min(1).max(30) }).strict();
 const xml = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]!));
@@ -66,9 +100,9 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
     await write(path.join(source, "app/build.gradle.kts"), `plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose"); id("com.google.devtools.ksp") }\nandroid { namespace = "generated"; compileSdk = 35; defaultConfig { applicationId = "${packageId}"; minSdk = 26; targetSdk = 35; versionCode = ${Math.max(1, Number(input.revision.match(/^v(\d+)/)?.[1]) || 1)}; versionName = "1.${Math.max(1, Number(input.revision.match(/^v(\d+)/)?.[1]) || 1)}" }; buildFeatures { compose = true }; compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }; kotlinOptions { jvmTarget = "17" }; packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }; lint { abortOnError = true } }\nksp { arg("room.schemaLocation", "$projectDir/schemas") }\ndependencies { implementation(platform("androidx.compose:compose-bom:2025.05.01")); implementation("androidx.activity:activity-compose:1.10.1"); implementation("androidx.compose.material3:material3"); implementation("androidx.compose.material:material-icons-extended"); implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0"); implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0"); implementation("androidx.room:room-runtime:2.7.1"); implementation("androidx.room:room-ktx:2.7.1"); ksp("androidx.room:room-compiler:2.7.1"); implementation("androidx.core:core-ktx:1.16.0"); implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"); testImplementation("junit:junit:4.13.2"); testImplementation("org.json:json:20240303"); testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2") }\n`);
     const design = input.design as { developer_design: { title: string } };
     const mediaWorkload = /photo|image|camera|bitmap|video/i.test(JSON.stringify(input.project.brief));
-    await write(path.join(source, "app/src/main/AndroidManifest.xml"), `<manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/><application android:label="${xml(input.project.brief.name || design.developer_design.title)}" android:allowBackup="false" android:largeHeap="${mediaWorkload ? "true" : "false"}" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar"><activity android:name="generated.MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity><provider android:name="androidx.core.content.FileProvider" android:authorities="${packageId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/meld_file_paths"/></provider></application></manifest>`);
+    await write(path.join(source, "app/src/main/AndroidManifest.xml"), `<manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/><application android:label="${xml(input.project.brief.name || design.developer_design.title)}" android:allowBackup="false" android:largeHeap="${mediaWorkload ? "true" : "false"}" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar"><activity android:name="generated.MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity><provider android:name="androidx.core.content.FileProvider" android:authorities="${packageId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/meld_file_paths"/></provider></application></manifest>`);
     await write(path.join(source, "approved-design.json"), input.design);
-    const instructions = "Implement the approved detailed design as a complete offline Android Kotlin/Jetpack Compose application. Generate actual feature logic, durable local persistence, navigation, only the required screen states and task behavior, accessibility and specified colors. Do not substitute a generic feature template, omit requested features, or add excluded features. Namespace/package is generated. Use appProfile.name as the user-facing app name; the developer document title may contain specification wording and is not UI copy. Provide generated.MainActivity and meaningful JUnit tests of pure app logic (state transitions/serialization/rules), not UI instrumentation. Gradle/manifest are supplied and may not be changed. The supplied manifest includes a FileProvider at authority applicationId + .files, exposing only cacheDir/shared_images/. Encode temporary shared JPEGs there, grant read access using ClipData and FLAG_GRANT_READ_URI_PERMISSION, and clean them after 24 hours. The manifest also declares WRITE_EXTERNAL_STORAGE only through API 28; request it at runtime before legacy saving on API 26–28, handle denial without losing edits, and use MediaStore pending publication on API 29+. Never substitute an always-throwing platform gateway. Available dependencies: Compose Material3, material-icons-extended, lifecycle 2.9.0, Room 2.7.1, JUnit4. Use stable Material3 APIs or explicit OptIn annotations. Test code must not require Android runtime. Return only .kt files under app/src/main/java/generated/ or app/src/test/java/generated/. Do not perform network or host-process operations. Implement the exact approved design and its domain rules, including save/resume and restart behavior when specified. Keep system bar icons readable against the actual screen background. If approvedDesign.brief.market_signals.foundation is present, retain that base app’s primary function and core loop. Integrate approved enhancements into that experience; do not add unrelated standalone game modes or copy reference branding.";
+    const instructions = "Implement the approved detailed design as a complete offline Android Kotlin/Jetpack Compose application. Generate actual feature logic, durable local persistence, navigation, only the required screen states and task behavior, accessibility and specified colors. Do not substitute a generic feature template, omit requested features, or add excluded features. Namespace/package is generated. Use appProfile.name as the user-facing app name; the developer document title may contain specification wording and is not UI copy. Provide generated.MainActivity and meaningful JUnit tests of pure app logic (state transitions/serialization/rules), not UI instrumentation. Gradle/manifest are supplied and may not be changed. The supplied launcher manifest uses windowSoftInputMode=adjustResize. Use Compose-managed edge-to-edge insets consistently, consume Scaffold padding before applying IME padding, and do not set adjustPan in generated code. The supplied manifest includes a FileProvider at authority applicationId + .files, exposing only cacheDir/shared_images/. Encode temporary shared JPEGs there, grant read access using ClipData and FLAG_GRANT_READ_URI_PERMISSION, and clean them after 24 hours. The manifest also declares WRITE_EXTERNAL_STORAGE only through API 28; request it at runtime before legacy saving on API 26–28, handle denial without losing edits, and use MediaStore pending publication on API 29+. Never substitute an always-throwing platform gateway. Available dependencies: Compose Material3, material-icons-extended, lifecycle 2.9.0, Room 2.7.1, JUnit4. Use stable Material3 APIs or explicit OptIn annotations. Test code must not require Android runtime. Return only .kt files under app/src/main/java/generated/ or app/src/test/java/generated/. Do not perform network or host-process operations. Implement the exact approved design and its domain rules, including save/resume and restart behavior when specified. Keep system bar icons readable against the actual screen background. If approvedDesign.brief.market_signals.foundation is present, retain that base app’s primary function and core loop. Integrate approved enhancements into that experience; do not add unrelated standalone game modes or copy reference branding.";
     const delivered = input.project.lastDeliveredBuild || (input.project.latestBuild?.status === "succeeded" ? input.project.latestBuild : undefined);
     const integration = { gradle: await fs.readFile(path.join(source, "app/build.gradle.kts"), "utf8"), plugins: await fs.readFile(path.join(source, "build.gradle.kts"), "utf8"), manifest: await fs.readFile(path.join(source, "app/src/main/AndroidManifest.xml"), "utf8"), fileProviderPaths: await fs.readFile(path.join(source, "app/src/main/res/xml/meld_file_paths.xml"), "utf8"), initialBuild: !delivered, instruction: "This is an initial app schema unless previous implementation is supplied. Do not invent legacy migrations for nonexistent schema versions; preserve versioned migration infrastructure. Compiler and lint checks independently validate integration." };
     let prior: unknown = null, issues: string[] = [], checkedSource = false;
@@ -88,7 +122,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
         if (repair && repair.round > Math.max(-1, ...savedRounds) && sha(JSON.stringify(repair.approvedDesign)) === sha(JSON.stringify(input.design)) && sha(JSON.stringify(repair.appProfile)) === sha(JSON.stringify(input.project.brief))) {
           prior = repair.prior; issues = repair.issues;
           await write(path.join(model, "repair-checkpoint-0.json"), { plan: repair.plan, files: repair.files });
-          await write(path.join(input.directory, "recovered-prefix.json"), { previousBuildId: previousId, planResponse: repair.planResponse, planSha256: repair.planSha256, calls: repair.calls, recoveredFiles: repair.files.length, plannedFiles: repair.plan.files.length, recoveryOutputLimit: repair.recoveryOutputLimit });
+          await write(path.join(input.directory, "recovered-prefix.json"), { previousBuildId: previousId, planResponse: repair.planResponse, planSha256: repair.planSha256, calls: repair.calls, recoveredFiles: repair.files.length, planRevalidationRequired: "planNeedsRepair" in repair && repair.planNeedsRepair, plannedFiles: repair.plan.files.length, recoveryOutputLimit: repair.recoveryOutputLimit });
           await write(path.join(input.directory, "retry-source.json"), { previousBuildId: previousId, revision: input.revision, designHash: input.designHash });
           break;
         }
@@ -104,8 +138,10 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
             prior = Files.parse(JSON.parse(await fs.readFile(path.join(modelDirectory, combined[0]), "utf8")));
             issues = z.array(z.string()).parse(JSON.parse(await fs.readFile(failure, "utf8")).issues);
             const savedRound = Number(combined[0].match(/\d+/)![0]);
+            const failureData = await json(failure);
+            const runtimeFindings = ["native", "visual"].includes(failureData.stage) || Boolean(failureData.uiReview) || issues.some(issue => /Actual Android UI checks failed|Native harness|screenshot review/i.test(issue));
             const checkedLog = path.join(previousDirectory, `gradle-${savedRound}.log`);
-            if (await exists(checkedLog) && /^BUILD SUCCESSFUL in /m.test(await fs.readFile(checkedLog, "utf8")) && !(await exists(path.join(previousDirectory, `review-${savedRound}.json`)))) {
+            if (!runtimeFindings && await exists(checkedLog) && /^BUILD SUCCESSFUL in /m.test(await fs.readFile(checkedLog, "utf8")) && !(await exists(path.join(previousDirectory, `review-${savedRound}.json`)))) {
               const files = Files.parse(prior).files;
               checkedSource = (await Promise.all(files.map(async file => await exists(path.join(previousDirectory, "source", file.path)) && await fs.readFile(path.join(previousDirectory, "source", file.path), "utf8") === file.content))).every(Boolean);
               if (checkedSource) {
@@ -114,7 +150,7 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
               }
             }
             const previousManifest = path.join(previousDirectory, "source/app/src/main/AndroidManifest.xml");
-            if (await exists(checkedLog) && /^BUILD SUCCESSFUL in /m.test(await fs.readFile(checkedLog, "utf8")) && await exists(previousManifest) && await fs.readFile(previousManifest, "utf8") !== integration.manifest) {
+            if (!runtimeFindings && await exists(checkedLog) && /^BUILD SUCCESSFUL in /m.test(await fs.readFile(checkedLog, "utf8")) && await exists(previousManifest) && await fs.readFile(previousManifest, "utf8") !== integration.manifest) {
               checkedSource = true; issues = [];
               await write(path.join(input.directory, "platform-recheck.json"), { previousBuildId: previousId, previousManifestSha256: await fileSha(previousManifest), reason: "Rebuild and review the saved implementation against updated platform configuration before requesting more code changes." });
             }
@@ -156,22 +192,33 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
       await write(path.join(input.directory, "update-source.json"), { previousBuildId: delivered.id, previousRevision: delivered.revision, previousDesignHash: delivered.designHash });
     }
     const feedbackId = input.project.latestBuild?.id || delivered?.id;
-    if (prior && feedbackId && /^job-[a-f\d-]{36}$/.test(feedbackId)) {
-      const feedback = path.join(path.dirname(input.directory), feedbackId, "runtime-findings.json");
-      if (await exists(feedback)) {
-        const findings = z.object({ apkSha256: z.string().regex(/^[a-f\d]{64}$/), issues: z.array(z.string().max(3000)).min(1).max(20) }).strict().parse(await json(feedback));
-        const testedApk = path.join(path.dirname(input.directory), feedbackId, "source/app/build/outputs/apk/debug/app-debug.apk");
-        if (!(await exists(testedApk)) || await fileSha(testedApk) !== findings.apkSha256) throw new WorkbenchError("stale_runtime_feedback", "Runtime findings do not match the previous APK. Test the current build before retrying.", 409);
-        issues.push(...findings.issues);
-        await write(path.join(input.directory, "runtime-feedback-source.json"), { previousBuildId: feedbackId, ...findings });
+    const feedback = prior ? await readRuntimeFeedback(path.dirname(input.directory), feedbackId, { projectId: input.project.id, revision: input.revision, designHash: input.designHash }) : null;
+    if (feedback) {
+      const sourceFile = await exists(path.join(input.directory, "retry-source.json")) ? "retry-source.json" : "update-source.json";
+      const sourceId = await exists(path.join(input.directory, sourceFile)) ? (await json(path.join(input.directory, sourceFile))).previousBuildId : undefined;
+      const receipt = typeof sourceId === "string" && /^job-[a-f\d-]{36}$/.test(sourceId) ? path.join(path.dirname(input.directory), sourceId, "runtime-feedback-source.json") : undefined;
+      const replay = Boolean(receipt && await exists(receipt) && sha(JSON.stringify(await json(receipt))) === sha(JSON.stringify(feedback)));
+      if (replay) await write(path.join(input.directory, "runtime-feedback-replay.json"), { sourceBuildId: sourceId, feedbackSha256: sha(JSON.stringify(feedback)), reason: "The recovered implementation or repair checkpoint already received this exact APK-bound feedback. Preserve its current findings and pending plan; compile, review and configured runtime gates still run." });
+      const newFeedback = !replay && feedback.issues.some(issue => !issues.includes(issue));
+      if (!replay) issues = [...new Set([...issues, ...feedback.issues])];
+      // A restored partial repair plan predates the device findings. Keep its
+      // completed modules, but plan again so the new findings cannot be skipped.
+      const checkpoint = path.join(model, "repair-checkpoint-0.json");
+      if (newFeedback && await exists(checkpoint)) {
+        const restored = await json(checkpoint), merged = new Map(removeSourceFiles(Files.parse(prior).files, z.array(z.string()).parse(restored.plan.removePaths || [])).map(file => [file.path, file]));
+        for (const file of z.array(SourceFiles.shape.files.element).parse(restored.files)) merged.set(file.path, file);
+        prior = Files.parse({ files: [...merged.values()], explanation: "Preserved completed repair modules before adding device findings." });
+        await fs.rm(checkpoint);
       }
+      await write(path.join(input.directory, "runtime-feedback-source.json"), feedback);
     }
+    const approvedOutline = approvedOutlineForBuild(input.project, input.revision);
     const rebuildOnly = Boolean(prior && (checkedSource && !issues.length || issues.length && issues.every(isHarnessFailure)));
     if (rebuildOnly) await write(path.join(input.directory, "harness-retry.json"), { previousBuildId: input.project.latestBuild?.id, reason: checkedSource && !issues.length ? "Recheck the exact previously compiled source for this approved revision and current platform configuration." : "Rebuild the unchanged accepted source after a native harness error; do not repair application code for test-script exceptions." });
     let runtimeReport: any = null;
     for (let round = 0; round < 5; round++) {
       await input.progress(round ? "Correcting app implementation checks…" : "Implementing your approved app design…");
-      const output = round === 0 && rebuildOnly ? Files.parse(prior) : await generateSources(model, round, instructions + " Use visualReference.visualBrief and approvedDesign.brief.market_signals.reference_observations when supplied: implement their applicable visual hierarchy, spacing, typography, density and control grouping within the approved appearance. Keep the primary canvas/content prominent. Address screenshot review repair instructions concretely. Unavailable observations do not establish a reference UI. Never replace deliberate app layout with a generic card stack.", { appProfile: input.project.brief, approvedDesign: input.design, visualReference, integration, packageId }, prior as any, issues, input.progress);
+      const output = round === 0 && rebuildOnly ? Files.parse(prior) : await generateSources(model, round, instructions + runtimeAcceptanceRequirements + productRequirements + " Use visualReference.visualBrief and approvedDesign.brief.market_signals.reference_observations when supplied: implement their applicable visual hierarchy, spacing, typography, density and control grouping within the approved appearance. Keep the primary canvas/content prominent. Address screenshot review repair instructions concretely. Unavailable observations do not establish a reference UI. Never replace deliberate app layout with a generic card stack.", { appProfile: input.project.brief, approvedDesign: input.design, approvedOutline, visualReference, integration, packageId }, prior as any, issues, input.progress);
       if (round === 0 && rebuildOnly) await write(path.join(model, "implementation-0.json"), output);
       if (new Set(output.files.map(f => f.path)).size !== output.files.length || !output.files.some(f => f.path === "app/src/main/java/generated/MainActivity.kt") || !output.files.some(f => f.path.startsWith("app/src/test/java/generated/"))) throw new WorkbenchError("invalid_code", "Generated app files are incomplete.", 422);
       const mainFile = output.files.find(f => f.path === "app/src/main/java/generated/MainActivity.kt")!;
@@ -183,12 +230,16 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
       for (const file of output.files) await write(path.join(source, file.path), file.content);
       await input.progress("Building the APK and running tests…");
       try { await gradle(source, environment, path.join(input.directory, `gradle-${round}.log`)); }
-      catch (error) { prior = output; issues = [(error as Error).message]; await write(path.join(input.directory, "failure.json"), { issues }); continue; }
+      catch (error) { prior = output; issues = [(error as Error).message]; await write(path.join(input.directory, "failure.json"), { issues, stage: "compile", round }); continue; }
+      await input.progress("Checking the implementation against your design…");
+      const review = await modelJson(model, `review-${round}`, "Review the Android app against the user-facing approved high-level design and the detailed implementation contract. Prioritize usable primary workflows and combinations of features, data integrity, privacy and actual crashes. A missing or broken primary feature is blocking. Distinguish reproducible ordinary-use defects from visual polish, rare boundary cases, optional refinements and platform guarantees outside app control. Record the latter as explicit follow-ups, not release blockers for this MVP. Prefix each issue [blocking] or [follow-up]. passed=true requires every approved primary feature to be implemented and no blocking issue; follow-ups may remain and must be recorded. Do not raise speculative compiler errors when the supplied exact sources have already passed compilation. Review the actual implementation, not just test existence. Remain concise: at most ten important issues and concise acceptance checks, about 1200 output words. This is static model review, not runtime verification." + productRequirements + runtimeAcceptanceRequirements, { appProfile: input.project.brief, approvedDesign: input.design, approvedOutline, integration, files: output.files, completedChecks: { assembleDebug: true, testDebugUnitTest: true, lintDebug: true } }, Review, 24000, "medium", 600000);
+      await write(path.join(input.directory, `review-${round}.json`), review);
+      if (!implementationReviewPassed(review)) { prior = output; issues = review.issues.filter(issue => !issue.startsWith("[follow-up]")); if (!issues.length) issues = review.issues; await write(path.join(input.directory, "failure.json"), { issues, stage: "review", round }); continue; }
       runtimeReport = null;
       if (environment.nativeSmoke?.projectId === input.project.id) {
         await input.progress("Testing your app on Android…");
         try { runtimeReport = await nativeCheck(environment.nativeSmoke, path.join(source, "app/build/outputs/apk/debug/app-debug.apk"), packageId, input.directory, round); }
-        catch (error) { prior = output; issues = [(error as Error).message]; await write(path.join(input.directory, "failure.json"), { issues }); if (error instanceof WorkbenchError && error.code === "native_harness") throw error; continue; }
+        catch (error) { prior = output; issues = [(error as Error).message]; await write(path.join(input.directory, "failure.json"), { issues, stage: "native", round }); if (error instanceof WorkbenchError && error.code === "native_harness") throw error; continue; }
       }
       uiReport = null;
       if (uiEntry) {
@@ -199,14 +250,10 @@ export function androidBuildRunner(environment: AndroidEnvironment): BuildRunner
           prior = output;
           issues = [...uiReport.review.repairInstructions, ...uiReport.review.scenarios.flatMap(scenario => [...scenario.visualIssues, ...scenario.behaviorIssues])];
           if (!issues.length) issues = ["The screenshot review failed. Correct the visual hierarchy, layout and readability against the supplied visual reference and approved design."];
-          await write(path.join(input.directory, "failure.json"), { issues, uiReview: uiReport });
+          await write(path.join(input.directory, "failure.json"), { issues, stage: "visual", round, uiReview: uiReport });
           continue;
         }
       }
-      await input.progress("Checking the implementation against your design…");
-      const review = await modelJson(model, `review-${round}`, "Review the Android app against the user-facing approved high-level design and the detailed implementation contract. Prioritize usable primary workflows and combinations of features, data integrity, privacy and actual crashes. A missing or broken primary feature is blocking. Distinguish reproducible ordinary-use defects from visual polish, rare boundary cases, optional refinements and platform guarantees outside app control. Record the latter as explicit follow-ups, not release blockers for this MVP. Prefix each issue [blocking] or [follow-up]. passed=true requires every approved primary feature to be implemented and no blocking issue; follow-ups may remain and must be recorded. Do not raise speculative compiler errors when the supplied exact sources have already passed compilation. Review the actual implementation, not just test existence. Remain concise: at most ten important issues and concise acceptance checks, about 1200 output words. This is static model review, not runtime verification.", { appProfile: input.project.brief, approvedDesign: input.design, integration, files: output.files, completedChecks: { assembleDebug: true, testDebugUnitTest: true, lintDebug: true } }, Review, 16000, "medium", 600000);
-      await write(path.join(input.directory, `review-${round}.json`), review);
-      if (!implementationReviewPassed(review)) { prior = output; issues = review.issues.filter(issue => !issue.startsWith("[follow-up]")); if (!issues.length) issues = review.issues; await write(path.join(input.directory, "failure.json"), { issues }); continue; }
       const reportDir = path.join(source, "app/build/test-results/testDebugUnitTest");
       let testsRun = 0, failedTests = 0;
       for (const name of await fs.readdir(reportDir).catch(() => [] as string[])) if (name.endsWith(".xml")) {

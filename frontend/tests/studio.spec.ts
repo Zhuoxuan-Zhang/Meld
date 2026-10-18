@@ -123,3 +123,31 @@ test("a failed outline keeps imported selections and retries after reload", asyn
     expect(server.received).toHaveLength(2); expect(server.received[1].featurePreferences).toEqual(project.featurePreferences);
   } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await server.close(); }
 });
+
+test("a user can report a built-app bug in the UI and retry a failed repair without losing the download", async ({ page }) => {
+  const server = await integrated();
+  try {
+    let project = await server.service.create({ requestKey: randomUUID(), brief: { name: "Notes", input: "An offline notes app", audience: "Students", purpose: "Save notes", goal: "Study", domains: ["Notes & lists"], style: "warm" }, exampleId: "notes" });
+    await server.service.build(project.id, { requestKey: randomUUID(), expectedVersion: project.version, revision: project.currentDesignRevision! }); await server.service.idle();
+    project = await server.service.get(project.id);
+    const delivered = project.latestBuild!, worker = server.options.build!;
+    let fail = true;
+    server.options.build = async input => { if (fail) { fail = false; throw new Error("Synthetic repair interruption"); } return worker(input); };
+    await connect(page, server); await page.goto(`/?project=${project.id}`);
+    const button = page.getByRole("button", { name: "Repair and rebuild", exact: true });
+    await expect(button).toBeDisabled();
+    await page.getByLabel("What needs fixing?", { exact: true }).fill("A saved note disappears when I reopen the app. Keep the note after restart.");
+    await button.click();
+    await expect(page.getByRole("alert")).toContainText("Synthetic repair interruption");
+    await expect(page.getByRole("heading", { name: "Your previous build is available.", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download previous build" })).toHaveAttribute("href", delivered.artifacts[0].url);
+    await expect(page.getByRole("link", { name: "Download Android app", exact: true })).toHaveCount(0);
+    await page.reload();
+    await page.getByRole("button", { name: "Retry build", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Your Android app is ready.", exact: true })).toBeVisible();
+    const after = await server.service.get(project.id);
+    expect(after.latestBuild!.id).not.toBe(delivered.id);
+    expect(after.currentDesignRevision).toBe(project.currentDesignRevision);
+    expect(after.featurePreferences).toEqual(project.featurePreferences);
+  } finally { await page.unrouteAll({ behavior: "wait" }).catch(() => undefined); await server.close(); }
+});

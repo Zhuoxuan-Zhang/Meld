@@ -3,7 +3,12 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { zodTextFormat } from 'openai/helpers/zod';
 import { write, redact, trackOwnedProcess } from './storage.js';
+
+export function codexJsonSchema(schema: z.ZodType<any>) {
+  return zodTextFormat(schema, 'result').schema;
+}
 
 export function parseCodex(response: any, schema: z.ZodType<any>, outputLimit: number) {
   if (response.execution.code !== 0 || !response.turn_completed || response.errors.length) throw new Error(`Incomplete Codex execution: ${response.errors.join('; ') || response.execution.code}`);

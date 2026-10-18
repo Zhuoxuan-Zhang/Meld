@@ -38,6 +38,25 @@ it('reports every invalid edit path and applies none of a failed patch', () => {
   expect(source.title).toBe(title);
 });
 
+it('targets named entity fields independently of their array positions', () => {
+  const source = fixtureData().design;
+  source.entities[0].fields = [
+    { name: 'completedAt', type: 'Instant', nullable: true, validation: 'Terminal timestamp', default_value: 'null' },
+    { name: 'note', type: 'String', nullable: true, validation: 'Plain text', default_value: 'null' },
+    { name: 'presetId', type: 'String', nullable: true, validation: 'Optional preset', default_value: 'null' },
+  ];
+  const patch = { edits: [{ path: ['entities', 'entity-note', 'fields', 'note', 'validation'], format: 'text' as const, value: 'Empty clears the note' }] };
+  for (const fields of [source.entities[0].fields, [...source.entities[0].fields].reverse()]) {
+    const draft = structuredClone(source); draft.entities[0].fields = fields;
+    const result = applyDesignPatch(draft, patch);
+    expect(result.entities[0].fields.find(field => field.name === 'note')!.validation).toBe('Empty clears the note');
+    for (const name of ['completedAt', 'presetId']) expect(result.entities[0].fields.find(field => field.name === name)).toEqual(fields.find(field => field.name === name));
+  }
+  expect(source.entities[0].fields[1].validation).toBe('Plain text');
+  source.entities[0].fields.push({ ...source.entities[0].fields[1] });
+  expect(() => applyDesignPatch(source, patch)).toThrow('ambiguous item name');
+});
+
 it.each([
   ['codex_cli', 'fields'], ['claude_cli', 'fields'],
   ['codex_cli', 'references'], ['claude_cli', 'references'],

@@ -1,3 +1,4 @@
+import { currentWorker, workerIsAlive, type WorkerOwner } from "../worker";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -23,7 +24,7 @@ export const DesignInput = z.object({
   feature_requests: z.array(z.object({ id: z.string().min(1).max(240), name: z.string().trim().min(1).max(120), description: z.string().max(1000) }).strict()).max(100).default([]),
 }).strict();
 export type DesignInputValue = z.infer<typeof DesignInput>;
-export type PipelineJob = { id: string; design_id: string; input: DesignInputValue; signature: string;
+export type PipelineJob = { worker?: WorkerOwner; id: string; design_id: string; input: DesignInputValue; signature: string;
   status: "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed"; phase: string;
   created_at: string; updated_at: string; reference_apps: { appId: string; title: string; rank: number }[];
   referenceOnly?: boolean; referenceJobId?: string; execution?: "apk" | "market"; progress?: PipelineProgress; missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
@@ -132,10 +133,10 @@ export class PipelineJobs {
     for (const file of await fs.readdir(this.options.directory)) {
       if (!/^pipeline-[a-f\d-]{36}\.json$/.test(file)) continue;
       const job = await this.get(file.slice(0, -5));
-      if (!["queued", "running"].includes(job.status)) continue;
+      if (!["queued", "running"].includes(job.status) || workerIsAlive(job.worker)) continue;
       if (job.referenceOnly) {
         const market = await json(path.join(this.options.directory, job.id, "market.json"));
-        job.status = "queued"; this.enqueue(job, market.scans, market.reference_apps || market.apps); continue;
+        job.worker = currentWorker(); job.status = "queued"; await write(this.file(job.id), job); this.enqueue(job, market.scans, market.reference_apps || market.apps); continue;
       }
       if (await exists(path.join(this.service.store.directory(job.design_id), "manifest.json"))) {
         job.result = await this.service.get(job.design_id); job.status = "succeeded"; job.phase = "Your design is ready.";
@@ -169,7 +170,7 @@ export class PipelineJobs {
         if (index[input.request_key].signature !== signature) throw new WorkbenchError("idempotency_conflict", "This request ID was used for different choices.", 409);
         return this.get(index[input.request_key].id);
       }
-      const job: PipelineJob = { id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature, ...preparation,
+      const job: PipelineJob = { worker: currentWorker(), id: `pipeline-${randomUUID()}`, design_id: `design-${randomUUID()}`, input, signature, ...preparation,
         status: "queued", phase: preparation?.referenceJobId ? "Finishing background reference analysis…" : "Preparing your reference apps…", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), reference_apps: apps.map(a => ({ appId: a.appId, title: a.title, rank: a.rank })) };
       await write(this.file(job.id), job); await write(path.join(this.options.directory, job.id, "market.json"), { classification: "market_signals", scans, apps, base_app_id: input.base_app_id, preferences: input.preferences, feature_requests: input.feature_requests, limitations: ["Store metadata is not APK behavior evidence.", "User feature choices and descriptions are preferences, not REA findings."] });
       index[input.request_key] = { signature, id: job.id }; await write(indexFile, index);
@@ -182,7 +183,7 @@ export class PipelineJobs {
       if (!["waiting_inputs", "waiting_user", "failed"].includes(job.status)) return job;
       const market = await json(path.join(this.options.directory, job.id, "market.json"));
       if (job.status === "failed") await write(path.join(this.options.directory, job.id, `failed-attempt-${Date.now()}.json`), job);
-      job.status = "queued"; job.phase = "Continuing from your saved progress…"; delete job.error; await write(this.file(id), job);
+      job.worker = currentWorker(); job.status = "queued"; job.phase = "Continuing from your saved progress…"; delete job.error; await write(this.file(id), job);
       this.enqueue(job, market.scans, market.reference_apps || market.apps); return job;
     }, 1000);
   }
@@ -210,7 +211,7 @@ export class PipelineJobs {
     else this.tail = this.tail.then(() => this.run(job, scans, apps)).catch(() => undefined);
   }
   private async run(job: PipelineJob, scans: MarketResult[], apps: MarketApp[]) {
-    job.status = "running"; job.phase = "Checking reference files…"; delete job.missing_apps; await write(this.file(job.id), job);
+    job.worker = currentWorker(); job.status = "running"; job.phase = "Checking reference files…"; delete job.missing_apps; await write(this.file(job.id), job);
     try {
       const missing: string[] = [], apks: string[] = [], locks: { appId: string; apk_sha256: string }[] = [];
       job.progress = { stage: "download", apps: apps.map(app => ({ appId: app.appId, title: app.title, download: { status: "pending", bytes: 0 }, analysis: "pending" })), steps: [{ id: "download", label: "Get reference apps", status: "running" }, { id: "analysis", label: "Review reference apps", status: "pending" }, { id: "compare", label: "Compare features", status: "pending" }, { id: "merge", label: "Merge the design", status: "pending" }, { id: "document", label: "Write your design document", status: "pending" }] };

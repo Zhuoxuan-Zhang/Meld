@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { projectServer } from "../../frontend/tests/project-fixtures";
 import { workflowApi, Handoff, importSelection } from "../server/workflow";
 import { SignalsStore } from "../server/signals";
@@ -20,6 +21,13 @@ async function integrated() {
   const signals = new SignalsStore(path.join(upstream.root, "meld-signals"));
   const snapshot = await signals.record(fromScannerReport("Notes & lists", scannerReport("Notes & lists")));
   const scan = { ...snapshot, apps: snapshot.apps.map(a => ({ ...a, listedFeatures: { items: [{ name: "Quick notes", detail: "Write and save notes offline." }], model: "fixture", template: "fixture", generatedAt: snapshot.generatedAt } })) };
+  const cache = path.join(upstream.root, "features");
+  await mkdir(cache);
+  await writeFile(path.join(cache, "a".repeat(24) + ".json"), JSON.stringify({
+    kind: "meld.app-features", input: { domain: scan.domain, apps: scan.apps.map(a => ({ app_id: a.appId, title: a.title, summary: a.summary || "", description: a.description || "" })) },
+    output: { apps: scan.apps.map(a => ({ app_id: a.appId, features: a.listedFeatures.items })) },
+    features: Object.fromEntries(scan.apps.map(a => [a.appId, a.listedFeatures])),
+  }));
   const draft = { ...emptyDraft(), name: "Pocket Notes", domains: ["Notes & lists"], goal: "An offline student notebook", selected: { "com.example.notes": ["com.example.notes:quick-notes"] }, market: { "Notes & lists": scan } };
   let handler!: Middleware;
   workflowApi({}, path.join(upstream.root, "frontend"), signals, upstream.service).configureServer({ middlewares: { use: h => { handler = h; } } });
@@ -36,7 +44,16 @@ test("import keeps the chosen app and exact features, rejects foreign features, 
     expect(project.featurePreferences.baseAppId).toBe("com.example.notes");
     expect(Handoff.safeParse({ ...body, baseAppId: "com.example.foreign" }).success).toBe(false);
     const baseOnly = Handoff.parse({ ...handoffBody({ ...api.draft, baseAppId: "com.example.notes", selected: {} }), requestKey: randomUUID() });
-    expect((await importSelection(api.service, api.signals, baseOnly)).featurePreferences).toMatchObject({ baseAppId: "com.example.notes", selections: { "com.example.notes": [] }, customRequests: [] });
+    const domainOnly = handoffBody({ ...api.draft, name: "Focus & habits app", goal: "", description: "", discoverySource: "domains", baseAppId: "com.example.notes", selected: {} });
+    expect(domainOnly.brief.input).toContain("primary purpose and core user loop");
+    expect(domainOnly.brief.input).not.toContain("Focus & habits");
+    expect(handoffBody({ ...api.draft, baseAppId: "com.example.notes", goal: "My explicit goal" }).brief.input).toBe("My explicit goal");
+    const baseProject = await importSelection(api.service, api.signals, baseOnly);
+    expect(baseProject.featurePreferences).toMatchObject({ baseAppId: "com.example.notes", selections: { "com.example.notes": [] }, customRequests: [] });
+    expect(baseProject.references["Notes & lists"].apps[0].listedFeatures?.items).toEqual([{ name: "Quick notes", detail: "Write and save notes offline." }]);
+    expect((await api.service.get(baseProject.id)).references).toEqual(baseProject.references);
+    expect((await api.signals.read(api.scan.scanId!)).apps[0].listedFeatures).toBeUndefined();
+    expect((await api.service.options.signals.read(baseProject.references["Notes & lists"].scanId!)).apps[0].listedFeatures?.items).toHaveLength(1);
     expect(Object.values(project.references).flatMap(s => s.apps.map(a => a.appId))).toEqual(["com.example.notes"]);
     expect(project.featurePreferences.customRequests).toEqual(body.references[0].features);
     expect(project.brief.input).toBe(api.draft.goal);

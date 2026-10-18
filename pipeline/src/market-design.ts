@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resumeMarketDesignBudget } from './model-recovery.js';
 import { promises as fs } from 'node:fs';
 import { Claude } from './claude.js';
 import { synthesize } from './design.js';
@@ -34,7 +35,7 @@ async function execute() {
   const identity = sha(JSON.stringify({ brief, market, specs, config }));
   await fs.mkdir(run, { recursive: true });
   let state: any;
-  if (await exists(path.join(run, 'run.json'))) { state = await json(path.join(run, 'run.json')); if (state.fingerprint?.digest !== identity) throw new Error('Market design inputs changed; create a new request'); }
+  if (await exists(path.join(run, 'run.json'))) { state = resumeMarketDesignBudget(await json(path.join(run, 'run.json')), { brief, market, specs, config }); }
   else state = { id: path.basename(run), mode: 'market_assisted_design', status: 'running', created_at: new Date().toISOString(), config, stages: {}, calls: [], fingerprint: { digest: identity }, human_decisions: !brief.market_signals?.approved_high_level };
   if (state.status === 'failed') await write(path.join(run, 'synthesis', `failed-state-${Date.now()}.json`), state);
   state.status = 'running'; delete state.error;
