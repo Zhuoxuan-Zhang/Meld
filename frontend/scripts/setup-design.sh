@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-backend_revision="e54dd1c6777ff039b81863c4d178faad2f3f2884"
+backend_revision="6a6fe6eea2886a17d792e9231a8081585e898cca"
 if [ -f "$PWD/pipeline/src/integration.ts" ] && [ -d "$PWD/backend" ]; then
   backend_dir="$PWD"
 else
@@ -25,9 +25,11 @@ fi
 workflow_patch="$PWD/frontend/patches/meld-workflow.patch"
 # Meld's frontend is synced separately. Backend setup must not replay the
 # upstream UI/test hunks over the current studio or its Playwright settings.
-# This repository already includes the backend changes; only a separate pinned
-# checkout needs the compatibility patch, which local edits can invalidate.
-if [ "$backend_dir" != "$PWD" ] && ! git -C "$backend_dir" apply '--exclude=frontend/*' --reverse --check "$workflow_patch" 2>/dev/null; then
+# Current checkouts already include the backend changes, including when nested
+# in copy-agent2. Keep the compatibility patch only for older checkouts.
+if [ "$backend_dir" != "$PWD" ] &&
+  ! git -C "$backend_dir" merge-base --is-ancestor "$backend_revision" HEAD 2>/dev/null &&
+  ! git -C "$backend_dir" apply '--exclude=frontend/*' --reverse --check "$workflow_patch" 2>/dev/null; then
   git -C "$backend_dir" apply '--exclude=frontend/*' --check "$workflow_patch"
   git -C "$backend_dir" apply '--exclude=frontend/*' "$workflow_patch"
 fi
