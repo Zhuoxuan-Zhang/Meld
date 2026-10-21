@@ -1,3 +1,5 @@
+import { baseUiResolver, readBaseUiEvidence } from "./base-ui";
+import { imageMediaType } from "../../pipeline/dist/src/integration.js";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -26,7 +28,7 @@ export function projectOptionsFromEnv(env: Record<string, string | undefined>, f
   const emulator = env.MELD_EMULATOR_ENABLED !== "false" && sdk && existsSync(path.join(avdHome, `${avd}.ini`)) && Number.isInteger(port) && port >= 5554 && port <= 5584 && port % 2 === 0 ? new BrowserEmulator(() => new AdbEmulatorDriver({ sdk, avdHome, avd, port })) : undefined;
   return { emulator, directory: path.join(cache, "workflow"), designs: new DesignService(pipelineRoot, path.join(cache, "designs")), signals: new SignalsStore(path.join(cache, "signals")),
     pipeline: { directory: path.join(cache, "workflow/analysis-jobs"), apkDir: env.MELD_APK_DIR && path.resolve(env.MELD_APK_DIR), toolRoot: env.MELD_PIPELINE_TOOL_ROOT && path.resolve(env.MELD_PIPELINE_TOOL_ROOT), config: env.MELD_PIPELINE_CONFIG && path.resolve(env.MELD_PIPELINE_CONFIG), observationConfig: env.MELD_REA_OBSERVATION_CONFIG && path.resolve(env.MELD_REA_OBSERVATION_CONFIG), acquireApk: env.MELD_APK_AUTO_DOWNLOAD === "false" ? undefined : apkAcquirer({ aapt: env.MELD_AAPT || path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "build-tools/35.0.0/aapt2") }) },
-    highLevel: highLevelRunner, prepareReferences: env.MELD_BACKGROUND_REFERENCES !== "false", exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
+    highLevel: highLevelRunner, baseUi: baseUiResolver(path.join(cache, "workflow"), env.MELD_UI_VALIDATION_CONFIG && path.resolve(env.MELD_UI_VALIDATION_CONFIG)), prepareReferences: env.MELD_BACKGROUND_REFERENCES !== "false", exampleId: env.MELD_DESIGN_EXAMPLE, research: researchRunner(marketOptionsFromEnv(env, frontendDir)), explainConflicts,
     build: androidBuildRunner({ sdk: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", javaHome: env.JAVA_HOME || "/usr/lib/jvm/java-21-openjdk-amd64", templateDirectory: path.join(root, "backend/templates/android"), uiValidationConfig: env.MELD_UI_VALIDATION_CONFIG ? path.resolve(env.MELD_UI_VALIDATION_CONFIG) : undefined, nativeSmoke: env.MELD_NATIVE_SMOKE_PROJECT && env.MELD_NATIVE_SMOKE_ADB ? { projectId: env.MELD_NATIVE_SMOKE_PROJECT, script: env.MELD_NATIVE_SMOKE_SCRIPT ? path.resolve(env.MELD_NATIVE_SMOKE_SCRIPT) : path.join(root, "frontend/tests/puzzle-native-smoke.py"), adb: env.MELD_NATIVE_SMOKE_ADB, serial: env.MELD_NATIVE_SMOKE_SERIAL || "emulator-5580", output: env.MELD_NATIVE_SMOKE_OUTPUT ? path.resolve(env.MELD_NATIVE_SMOKE_OUTPUT) : path.join(frontendDir, "qa-screenshots/puzzle-harbor") } : undefined }) };
 }
 export function projectsMiddleware(service: ProjectService, availability?: () => Promise<Record<string, unknown>>): Middleware {
@@ -66,6 +68,13 @@ export function projectsMiddleware(service: ProjectService, availability?: () =>
         if (parts[4] === "dismiss") { const expected = z.object({ expectedVersion: z.number().int().positive() }).strict().parse(input); const p = await service.raw(id); if (p.pendingDecision?.id !== parts[3]) throw new WorkbenchError("stale_decision", "Reload the pending decision.", 409); return send(response, 200, await service.dismiss(id, expected.expectedVersion)); }
       }
       const project = await service.raw(id);
+      if (parts.length === 5 && parts[2] === "base-ui" && request.method === "GET") {
+        const evidence = await readBaseUiEvidence(service.options.directory, id, parts[3]);
+        const image = evidence.images.find(image => image.id === parts[4]);
+        if (!image) throw new WorkbenchError("not_found", "UI reference screenshot not found.", 404);
+        const bytes = await fs.readFile(image.path);
+        response.writeHead(200, { "Content-Type": imageMediaType(bytes), "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" }); response.end(bytes); return;
+      }
       if (parts.length === 3 && parts[2] === "latest-job" && request.method === "GET") return send(response, 200, { job: await service.latestJob(id) });
       if (parts.length === 3 && parts[2] === "build-input" && request.method === "GET") return send(response, 200, await service.buildInput(id, url.searchParams.get("revision") || undefined));
       if (parts.length === 3 && parts[2] === "high-level" && request.method === "PATCH") return send(response, 200, await service.patchOutline(id, OutlinePatch.parse(await readBody(request))));

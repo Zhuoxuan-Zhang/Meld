@@ -1,3 +1,4 @@
+import { imageMediaType } from './base-ui.js';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -30,7 +31,7 @@ export async function executeClaudeCli(dir: string, request: any, timeout: numbe
   for (const image of images) {
     const stat = await fs.stat(image);
     if (!path.isAbsolute(image) || !stat.isFile() || stat.size > 12 * 1024 * 1024) throw new Error('Invalid visual evidence image');
-    imageContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: (await fs.readFile(image)).toString('base64') } });
+    imageContent.push({ type: 'image', source: { type: 'base64', media_type: imageMediaType(await fs.readFile(image)), data: (await fs.readFile(image)).toString('base64') } });
   }
   const input = images.length ? JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: request.prompt }, ...imageContent] } }) + '\n' : request.prompt;
   await write(path.join(dir, 'schema.json'), request.schema);

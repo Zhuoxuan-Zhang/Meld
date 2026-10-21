@@ -1,3 +1,4 @@
+import { baseUiImages, baseUiDesignInstructions, imageMediaType } from './base-ui.js';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
@@ -37,6 +38,8 @@ export class Claude {
   }
   async ask<T>(label: string, prompt: string, context: any, schema: z.ZodType<T>, validate?: (x: T) => string[]): Promise<T> {
     this.lastCallId = undefined;
+    const images = label.startsWith('design') ? await baseUiImages(context?.brief?.market_signals?.base_ui) : [];
+    if (images.length) prompt += '\n' + baseUiDesignInstructions;
     let repair: any = null; let networkRetries = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       const id = `${String(this.state.calls.length + 1).padStart(4, '0')}-${label}-${Date.now()}`;
@@ -53,6 +56,14 @@ export class Claude {
         : this.provider === 'openai'
         ? { model: this.state.config.model, store: false, max_output_tokens: this.state.config.max_output_tokens, instructions: prompt, input: [{ role: 'user', content }], reasoning: { effort: 'low' }, text: { format: zodTextFormat(schema, 'result') } }
         : { model: this.state.config.model, max_tokens: this.state.config.max_output_tokens, system: prompt, messages: [{ role: 'user' as const, content }], output_config: { format: zodOutputFormat(schema), effort: 'low' as const } };
+      if (images.length) {
+        if (this.provider === 'codex_cli' || this.provider === 'claude_cli') request.images = images;
+        else {
+          const blocks = await Promise.all(images.map(async image => { const bytes = await fs.readFile(image), mime = imageMediaType(bytes); return this.provider === 'openai' ? { type: 'input_image', image_url: `data:${mime};base64,${bytes.toString('base64')}`, detail: 'auto' } : { type: 'image', source: { type: 'base64', media_type: mime, data: bytes.toString('base64') } }; }));
+          if (this.provider === 'openai') request.input = [{ role: 'user', content: [{ type: 'input_text', text: content }, ...blocks] }];
+          else request.messages = [{ role: 'user', content: [{ type: 'text', text: content }, ...blocks] }];
+        }
+      }
       if (attempt === 0 && this.provider === 'claude_cli') {
         const recovered = await recoverClaudeDesignFragment(this.run, this.state, label, request, schema, validate);
         if (recovered) { this.lastCallId = recovered.id; console.log(`Resume: validated saved fragment ${recovered.id}`); return recovered.value; }

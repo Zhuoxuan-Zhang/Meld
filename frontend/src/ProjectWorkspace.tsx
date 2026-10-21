@@ -176,7 +176,7 @@ export default function ProjectWorkspace() {
       <button className="studio-mobile-profile" aria-expanded={profileOpen} onClick={() => setProfileOpen(!profileOpen)}>Your app <Icon name="ChevronDown" size={18} /></button>
       <div className="studio-profile"><p className="studio-eyebrow">YOUR APP</p><h2>{outline?.document.title || design?.document.title || project?.brief.name || "An idea worth making"}</h2><p>{project?.brief.goal || project?.brief.purpose || project?.brief.input || "Describe an idea. Make it yours. Bring it to life."}</p>
         {project?.brief.audience && <p className="studio-audience"><Icon name="Heart" size={15} /><span>{project.brief.audience}</span></p>}
-        {baseApp && <div className="studio-base-summary"><p className="studio-eyebrow">BASE APP</p><strong>{baseApp.name}</strong><p>Its core purpose stays. Your selected features enhance it.</p></div>}
+        {baseApp && <div className="studio-base-summary"><p className="studio-eyebrow">BASE APP</p><strong>{baseApp.name}</strong><p>Its UI layout and core purpose guide the design. Your selected features enhance it.</p></div>}
         {!choosingFeatures && featureNames.length > 0 && <><p className="studio-eyebrow">WHAT IT WILL DO</p><ul className="studio-profile-features">{[...new Set(featureNames)].slice(0, 8).map(name => <li key={name}><Icon name="Check" size={14} />{name}</li>)}</ul></>}
         {design && <span className="studio-pill">Design v{design.version}{project?.approvedRevision === design.revision ? " · approved" : " · ready to review"}</span>}
         {project && <button className="studio-text-button" disabled={busy} onClick={() => { navigate("describe"); }}>Edit app profile <Icon name="NotebookPen" size={14} /></button>}

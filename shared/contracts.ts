@@ -1,3 +1,4 @@
+import type { BaseUiReferenceT, BaseUiMappingT } from "../pipeline/src/base-ui";
 import type { MarketResult } from "./market";
 
 export type Reference = { kind: "feature" | "page" | "flow" | "entity" | "acceptance" | "decision" | "color"; id: string };
@@ -23,8 +24,8 @@ export type ChangeProposal = {
 export type Brief = { name: string; input: string; audience: string; purpose: string; goal: string; style: "warm" | "sage" | "ink"; domains: string[]; coreTasks?: string[]; requiredStates?: string[] };
 export type FeatureRequest = { id: string; name: string; description: string };
 export type Conflict = { id: string; question: string; kind: string; blocking: boolean; advanced?: boolean; options: { id: string; behavior: string; benefits: string[]; costs: string[]; requires_option_ids: string[]; incompatible_option_ids: string[] }[] };
-export type HighLevelDesign = { revision: string; version: number; document: UserDocument; createdAt: string; approvedRevision?: string; developerRevision?: string };
-export type Decision = { id: string; kind: "high_level_changes"; baseRevision: string; document: UserDocument; response: string } | { id: string; kind: "merge_choices"; jobId: string; comparisonHash: string; conflicts: Conflict[] } | { id: string; kind: "design_changes"; proposal: ChangeProposal };
+export type HighLevelDesign = { baseUiMapping?: BaseUiMappingT; baseUiReference?: BaseUiReferenceT; revision: string; version: number; document: UserDocument; createdAt: string; approvedRevision?: string; developerRevision?: string };
+export type Decision = { id: string; kind: "high_level_changes"; baseUiMapping?: BaseUiMappingT; baseRevision: string; document: UserDocument; response: string } | { id: string; kind: "merge_choices"; jobId: string; comparisonHash: string; conflicts: Conflict[] } | { id: string; kind: "design_changes"; proposal: ChangeProposal };
 export type JobStatus = "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed";
 export type PipelineProgress = {
   stage: "download" | "analysis" | "compare" | "merge" | "document" | "complete";
@@ -41,7 +42,7 @@ export type Project = {
   designId: string | null; currentDesignRevision: string | null; approvedRevision: string | null;
   pendingDecision: Decision | null; lastJobId?: string; activeJobId: string | null; latestBuild: Build | null; lastDeliveredBuild?: Build;
   referencePreparationId?: string; referencePreparation?: { id: string; status: JobStatus; phase: string; progress?: PipelineProgress };
-  highLevelVersion?: number; highLevelDesign?: HighLevelDesign; highLevelFeedback?: string; needsResearch: boolean; needsDesign: boolean; design?: DesignView;
+  baseUiReference?: BaseUiReferenceT; highLevelVersion?: number; highLevelDesign?: HighLevelDesign; highLevelFeedback?: string; needsResearch: boolean; needsDesign: boolean; design?: DesignView;
   designHistory?: { designId: string; revision: string }[];
 };
 export type ApiError = { error: { code: string; message: string; details?: string[] } };

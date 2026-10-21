@@ -1,3 +1,4 @@
+import BaseUiReference from "./BaseUiReference";
 import { useEffect, useRef, useState } from "react";
 import type { ElementType } from "react";
 import type { Project, UserDocument } from "../../shared/contracts";
@@ -24,6 +25,7 @@ export default function HighLevelReview({ project, busy, save, request, confirm,
   const proposed = project.pendingDecision?.kind === "high_level_changes" ? project.pendingDecision : null;
   const editFeature = (id: string, patch: Partial<UserDocument["features"][number]>) => setDraft(current => ({ ...current, features: current.features.map(feature => feature.id === id ? { ...feature, ...patch } : feature) }));
   return <div aria-label="High-level design">
+    <BaseUiReference reference={outline.baseUiReference} mapping={outline.baseUiMapping} />
     <div className="studio-card studio-design outline-document">
       <div className="outline-toolbar"><span className="outline-edit-hint"><Icon name="NotebookPen" size={14} /><span className="outline-desktop-hint">Double-click any text to edit</span><span className="outline-touch-hint">Tap any text to edit</span></span><span className="studio-pill">Version {outline.version}{dirty ? " · unsaved edits" : ""}</span></div>
       <header className="outline-overview"><InlineText as="h2" label="App title" value={draft.title} limit={60} disabled={busy} editing={setEditing} change={title => setDraft(current => ({ ...current, title }))} /><InlineText label="App summary" value={draft.summary} multiline disabled={busy} editing={setEditing} change={summary => setDraft(current => ({ ...current, summary }))} /><div className="outline-audience"><Icon name="Heart" size={15} /><InlineText label="Target audience" value={draft.audience} disabled={busy} editing={setEditing} change={audience => setDraft(current => ({ ...current, audience }))} /></div></header>

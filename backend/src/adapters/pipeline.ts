@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { DesignService, pipelineRoot, z, json, write, exists, fileSha, semanticHash, WorkbenchError, withLock, checkApk, Decisions, validateDecisions } from "../../../pipeline/dist/src/integration.js";
+import { DesignService, pipelineRoot, BaseUiEvidence, baseUiImages, z, json, write, exists, fileSha, semanticHash, WorkbenchError, withLock, checkApk, Decisions, validateDecisions } from "../../../pipeline/dist/src/integration.js";
 import type { PipelineProgress } from "../../../shared/contracts";
 import { HighLevelDocument } from "../high-level";
 import type { ApkAcquirer } from "../apk-download";
@@ -27,7 +27,7 @@ export type DesignInputValue = z.infer<typeof DesignInput>;
 export type PipelineJob = { worker?: WorkerOwner; id: string; design_id: string; input: DesignInputValue; signature: string;
   status: "queued" | "running" | "waiting_inputs" | "waiting_user" | "succeeded" | "failed"; phase: string;
   created_at: string; updated_at: string; reference_apps: { appId: string; title: string; rank: number }[];
-  referenceOnly?: boolean; referenceJobId?: string; execution?: "apk" | "market"; progress?: PipelineProgress; missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
+  baseUi?: import("../../../pipeline/dist/src/integration.js").BaseUiEvidenceT; referenceOnly?: boolean; referenceJobId?: string; execution?: "apk" | "market"; progress?: PipelineProgress; missing_apps?: string[]; comparison_hash?: string; conflicts?: unknown[]; result?: Awaited<ReturnType<DesignService["get"]>>; error?: { code: string; message: string }; cli_exit_code?: number | null };
 export type PipelineRunner = (request: { run: string; brief: string; market: string; config: string; apks: string[]; pauseForDecisions?: boolean; analysisOnly?: boolean; basis?: "market"; staticRun?: string }) => Promise<number | null>;
 export type PipelineOptions = { directory: string; apkDir?: string; toolRoot?: string; config?: string; observationConfig?: string; runner?: PipelineRunner; pauseForDecisions?: boolean; acquireApk?: ApkAcquirer };
 
@@ -144,7 +144,12 @@ export class PipelineJobs {
       job.updated_at = new Date().toISOString(); await write(this.file(job.id), job);
     }
   }
-  async submit(input: DesignInputValue, preparation?: { referenceOnly?: boolean; referenceJobId?: string }) {
+  async submit(input: DesignInputValue, preparation?: { referenceOnly?: boolean; referenceJobId?: string; baseUi?: import("../../../pipeline/dist/src/integration.js").BaseUiEvidenceT }) {
+    if (preparation?.baseUi) {
+      const evidence = BaseUiEvidence.parse(preparation.baseUi);
+      if (evidence.reference.baseAppId !== input.base_app_id) throw new WorkbenchError("base_ui_identity", "The visual reference must match the selected base app.", 422);
+      await baseUiImages(evidence);
+    }
     const scans = await Promise.all(input.scan_ids.map(id => this.signals.read(id)));
     if (new Set(input.scan_ids).size !== input.scan_ids.length) throw new WorkbenchError("invalid_input", "Choose each scan only once.");
     const all = new Map<string, MarketApp>();
@@ -213,6 +218,7 @@ export class PipelineJobs {
   private async run(job: PipelineJob, scans: MarketResult[], apps: MarketApp[]) {
     job.worker = currentWorker(); job.status = "running"; job.phase = "Checking reference files…"; delete job.missing_apps; await write(this.file(job.id), job);
     try {
+      if (job.baseUi) await baseUiImages(job.baseUi);
       const missing: string[] = [], apks: string[] = [], locks: { appId: string; apk_sha256: string }[] = [];
       job.progress = { stage: "download", apps: apps.map(app => ({ appId: app.appId, title: app.title, download: { status: "pending", bytes: 0 }, analysis: "pending" })), steps: [{ id: "download", label: "Get reference apps", status: "running" }, { id: "analysis", label: "Review reference apps", status: "pending" }, { id: "compare", label: "Compare features", status: "pending" }, { id: "merge", label: "Merge the design", status: "pending" }, { id: "document", label: "Write your design document", status: "pending" }] };
       const savedMarket = await json(path.join(this.options.directory, job.id, "market.json"));
@@ -265,7 +271,7 @@ export class PipelineJobs {
         implementation: "Android Kotlin / Jetpack Compose", excluded: ["accounts", "cloud sync"],
         reference_scopes: Object.fromEntries(locks.map(lock => [lock.appId, { core_tasks: ["reference_behavior"], scope: "Inspect representative local method behavior relevant to this reference's selected listing features. This is a scoped contribution, not full-app coverage. Store descriptions are leads, not APK facts. Keep unconfirmed feature wiring, lifecycle, persistence and remote-service behavior explicitly unknown. Do not require the source app to implement the target product's other features or screen states." }])),
         scope: job.input.approved_outline ? "Implement the approved high-level design in market_signals; preserve its features, flows, appearance, choices and exclusions. It supersedes the original feature requests. Reference APKs cannot override this approval." : await renderSelectionScope(job.input, apps),
-        market_signals: { ...(foundation ? { foundation } : {}), ...(job.input.approved_outline ? { approved_high_level: job.input.approved_outline } : {}), scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
+        market_signals: { ...(job.baseUi ? { base_ui: job.baseUi } : {}), ...(foundation ? { foundation } : {}), ...(job.input.approved_outline ? { approved_high_level: job.input.approved_outline } : {}), scans, selected_package_ids: apps.map(a => a.appId), classification: "market_signals" } };
       const market = await json(path.join(directory, "market.json"));
       for (const app of market.apps) if (app.apk_sha256 && app.apk_sha256 !== locks.find(l => l.appId === app.appId)?.apk_sha256) throw new WorkbenchError("reference_changed", "Reference files changed; create a new design request.", 409);
       market.reference_apps ||= market.apps;

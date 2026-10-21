@@ -21,3 +21,7 @@ export type { DesignModel } from './workbench/model.js';
 export type { RevisionDataT, UserDocumentT, ChangePlanT } from './workbench/schemas.js';
 export type DesignView = Awaited<ReturnType<import('./workbench/service.js').DesignService['get']>>;
 export type DesignProposal = Awaited<ReturnType<import('./workbench/service.js').DesignService['createProposal']>>;
+export { BaseUiVisual, BaseUiReference, BaseUiEvidence, baseUiImages, imageMediaType, baseUiDesignInstructions } from './base-ui.js';
+export type { BaseUiReferenceT, BaseUiEvidenceT } from './base-ui.js';
+export { BaseUiMapping, validateBaseUiMapping } from "./base-ui.js";
+export type { BaseUiMappingT } from "./base-ui.js";

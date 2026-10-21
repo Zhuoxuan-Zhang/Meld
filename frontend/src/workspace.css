@@ -121,3 +121,5 @@
 .studio-base-summary > p:last-child { font-size: 12px; margin-bottom: 0; }
 .studio-foundation-banner { margin: 20px 0; padding: 16px 20px; border-left: 3px solid #46745b; background: #f4f8f2; border-radius: 8px; }
 .studio-foundation-banner p { margin: 6px 0 0; font-size: 13px; }
+
+.studio-base-ui h2{font-size:20px;margin:0 0 12px}.studio-base-ui>p{font-size:13px}.studio-base-ui-images{display:flex;gap:16px;overflow-x:auto;padding:12px 0 16px}.studio-base-ui-images figure{margin:0;flex:0 0 150px;min-width:0}.studio-base-ui-images img{display:block;width:150px;height:240px;object-fit:contain;background:#f5f4ef;border:1px solid #e7e5df;border-radius:8px}.studio-base-ui-images figcaption{font-size:11px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
