@@ -1,3 +1,4 @@
+import { baseUiDesignSkill } from './ui-design-skill.js';
 import { baseUiImages, baseUiDesignInstructions, imageMediaType } from './base-ui.js';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
@@ -39,7 +40,7 @@ export class Claude {
   async ask<T>(label: string, prompt: string, context: any, schema: z.ZodType<T>, validate?: (x: T) => string[]): Promise<T> {
     this.lastCallId = undefined;
     const images = label.startsWith('design') ? await baseUiImages(context?.brief?.market_signals?.base_ui) : [];
-    if (images.length) prompt += '\n' + baseUiDesignInstructions;
+    if (images.length) prompt += '\n' + baseUiDesignInstructions + '\n' + await baseUiDesignSkill();
     let repair: any = null; let networkRetries = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       const id = `${String(this.state.calls.length + 1).padStart(4, '0')}-${label}-${Date.now()}`;

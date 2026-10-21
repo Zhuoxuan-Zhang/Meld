@@ -19,6 +19,8 @@ Develop directly from this repository root; there is no nested `repo/` checkout.
 
 With Node 24, run `npm run dev`, then open http://127.0.0.1:4173. The script installs dependencies, prepares the scanner, compiles the pipeline and starts the integrated studio and API on that address. See [frontend setup](frontend/README.md), [workflow contracts](docs/project-workflow.md) and [pipeline setup](pipeline/README.md). Credentials, local caches, dependencies and prior experiment directories remain outside version control.
 
+See [UI design and coding skills](docs/ui-coding-skills.md) for stage boundaries, pinned sources and build provenance, and the [Focus Grove example](docs/focus-grove-example.md) for the five-reference tree-focus run.
+
 ## Standalone market scanner
 
 A standalone market-research component: **input an app category, receive a ranked list of up to five Android apps** with public Google Play evidence.

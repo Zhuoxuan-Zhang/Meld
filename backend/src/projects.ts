@@ -30,7 +30,7 @@ export const BuildAction = Action.extend({ revision: key, feedback: z.object({ b
 type StoredJob = Job & { worker?: WorkerOwner; projectVersion: number; request: Record<string, unknown>; signature: string; pipelineJobId?: string };
 export type ResearchRunner = (brief: Brief, directory: string, progress: (phase: string) => Promise<void>) => Promise<{ brief: Brief; references: MarketResult[] }>;
 export type BuildRunner = (input: { project: Project; revision: string; design: unknown; designHash: string; directory: string; progress: (phase: string) => Promise<void> }) => Promise<Omit<Build, "id" | "revision" | "designHash" | "status">>;
-export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; baseUi?: BaseUiResolver; prepareReferences?: boolean; emulator?: BrowserEmulator; build?: BuildRunner; exampleId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
+export type ProjectOptions = { directory: string; designs: DesignService; signals: SignalsStore; pipeline: PipelineOptions; research: ResearchRunner; highLevel?: HighLevelRunner; baseUi?: BaseUiResolver; prepareReferences?: boolean; emulator?: BrowserEmulator; build?: BuildRunner; exampleId?: string; featuredProjectId?: string; explainConflicts?: (conflicts: Conflict[], brief: Brief, directory: string) => Promise<Conflict[]> };
 const publicProposal = (proposal: Awaited<ReturnType<DesignService["createProposal"]>>): ChangeProposal => ({ id: proposal.id, base_revision: proposal.base_revision, request_text: proposal.request_text, plan: { ...proposal.plan, changes: proposal.plan.changes.map(({ operations: _operations, ...change }) => change) } });
 const publicDesign = (view: Awaited<ReturnType<DesignService["get"]>>, projectId: string) => ({ ...view, artifacts: view.artifacts.map(artifact => ({ ...artifact, url: `/api/projects/${projectId}/artifacts/${view.revision}/${encodeURIComponent(artifact.name)}` })) });
 
@@ -70,6 +70,17 @@ export class ProjectService {
   async revisions(id: string) {
     const project = await this.raw(id), ids = [...new Set([project.designId, ...(project.designHistory || []).map(item => item.designId)].filter((id): id is string => Boolean(id)))];
     return (await Promise.all(ids.map(async designId => (await this.options.designs.revisions(designId)).map(record => ({ ...record, designId }))))).flat().sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+  async featuredExample() {
+    if (!this.options.featuredProjectId) return null;
+    try {
+      const project = await this.raw(this.options.featuredProjectId), build = project.latestBuild;
+      if (project.needsDesign || build?.status !== "succeeded" || build.revision !== project.currentDesignRevision || !build.validation?.build || !build.validation.unitTests || !build.validation.lint) return null;
+      const apk = build.artifacts.find(artifact => artifact.name === "app.apk");
+      if (!apk || !await exists(path.join(this.options.directory, "builds", build.id, "artifacts", "app.apk"))) return null;
+      const base = Object.values(project.references).flatMap(scan => scan.apps).find(app => app.appId === project.featurePreferences.baseAppId);
+      return { id: project.id, name: project.brief.name, summary: project.brief.purpose || project.brief.input, baseAppName: base?.title || null };
+    } catch { return null; }
   }
   async list() {
     const dir = path.join(this.options.directory, "projects"); await fs.mkdir(dir, { recursive: true });

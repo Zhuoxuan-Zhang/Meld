@@ -31,7 +31,7 @@ async function fixture(runtimeFailure = false) {
   await cp(path.join(pipelineRoot, '../backend/templates/android'), template, { recursive: true });
   await write(path.join(sdk, 'platforms/android-35/android.jar'), 'fixture');
   await write(path.join(javaHome, 'bin/java'), 'fixture');
-  await writeFile(path.join(template, 'gradlew'), "#!/bin/bash\nprintf 'BUILD SUCCESSFUL in 1s\\n'\n", { mode: 0o755 });
+  await writeFile(path.join(template, 'gradlew'), "#!/bin/bash\nmkdir -p app/build/outputs/apk/debug\nprintf 'synthetic APK' > app/build/outputs/apk/debug/app-debug.apk\nprintf 'BUILD SUCCESSFUL in 1s\\n'\n", { mode: 0o755 });
   const calls = path.join(api.root, 'calls.jsonl'), cli = path.join(api.root, 'claude-fixture');
   await writeFile(cli, `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -39,22 +39,40 @@ const prompt = fs.readFileSync(0,'utf8');
 const schema = JSON.parse(process.argv[process.argv.indexOf('--json-schema')+1]);
 fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({prompt,schema})+'\\n');
 const output = schema.properties.passed ? {passed:false,issues:['[blocking] Crop controls are placeholders.'],acceptanceTests:['Crop must change exported pixels.']} : {};
-process.stdout.write(JSON.stringify({structured_output:output}));
+process.stdout.write(JSON.stringify({type:'result',structured_output:output}));
 `, { mode: 0o755 });
   const marker = path.join(api.root, 'native-executed'), native = path.join(api.root, 'native.py');
-  await writeFile(native, `from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text('unexpected')\nraise SystemExit(1)\n`);
+  await writeFile(native, `from pathlib import Path
+import os,sys,json,hashlib,base64
+Path(${JSON.stringify(marker)}).write_text('synthetic device fixture, not runtime proof')
+out=Path(os.environ['MELD_NATIVE_QA_OUTPUT'])
+(out/'home-ready.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='))
+report={'passed':True,'apkSha256':hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest(),'packageId':sys.argv[2],'device':{'serial':'fixture','api':'35','abi':'fixture','display':'fixture'},'cases':[{'case':'Synthetic orchestration fixture '+str(i),'passed':True} for i in range(6)],'scope':'Synthetic orchestration only; no actual device tested.'}
+(out/'runtime-report.json').write_text(json.dumps(report))
+`);
   const environment = { sdk, javaHome, templateDirectory: template, nativeSmoke: { projectId: project.id, script: native, adb: '/unused-fixture-adb', serial: 'fixture', output: path.join(api.root, 'device') } };
   const runner = androidBuildRunner(environment);
   return { api, cli, calls, marker, directory, environment, input: { project, revision, designHash, directory, design: { developer_design: { title: 'Synthetic' } }, progress: async () => {} }, runner };
 }
 
-test('a rejected implementation review cannot reach device checks or publish an APK', async () => {
+test('device screenshots inform implementation review while a rejection still prevents publication', async () => {
   const setup = await fixture(), previous = process.env.MELD_CLAUDE_BIN;
   process.env.MELD_CLAUDE_BIN = setup.cli;
   try {
     await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'model_output' });
+    const pinned = await json(path.join(setup.directory, 'coding-skills.json'));
+    const modelDirectories = await (await import('node:fs/promises')).readdir(path.join(setup.directory, 'model'));
+    const reviewDirectory = modelDirectories.find(name => name.startsWith('review-0-'))!;
+    const request = await json(path.join(setup.directory, 'model', reviewDirectory, 'request.json'));
+    const payload = JSON.parse(request.prompt.trim().split('\n').at(-1));
+    expect(payload.codingSkills.fingerprint).toBe(pinned.fingerprint);
+    expect(payload.codingSkills.skills.map((skill: any) => skill.id)).toEqual(['edge-to-edge', 'adaptive', 'jetpack-compose-performance']);
+    expect(request.system).not.toContain('# Base app UI design');
     expect((await json(path.join(setup.directory, 'review-0.json'))).passed).toBe(false);
-    expect(await exists(setup.marker)).toBe(false);
+    expect(await exists(setup.marker)).toBe(true);
+    expect(payload.runtimeEvidence.report.apkSha256).toBe(await fileSha(path.join(setup.directory,'source/app/build/outputs/apk/debug/app-debug.apk')));
+    expect(payload.runtimeEvidence.screenshots[0].name).toBe('home-ready.png');
+    expect(request.images).toHaveLength(1);
     expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
 });
@@ -126,7 +144,7 @@ test('a complete generated snapshot survives a source-gate interruption without 
     const first = JSON.parse((await readFile(setup.calls, 'utf8')).trim().split('\n')[0]);
     expect(first.schema.properties.passed).toBeDefined();
     expect(await exists(path.join(setup.directory, 'generated-source-recovery.json'))).toBe(true);
-    expect(await exists(setup.marker)).toBe(false);
+    expect(await exists(setup.marker)).toBe(true);
     expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
 });
@@ -174,7 +192,7 @@ test('a signalled native process stops as a harness failure without app repair',
     await writeFile(setup.environment.nativeSmoke.script, 'import os,signal\nos.kill(os.getpid(),signal.SIGTERM)\n');
     await expect(setup.runner(setup.input)).rejects.toMatchObject({ code: 'native_harness', message: expect.stringContaining('SIGTERM') });
     expect((await json(path.join(setup.directory, 'failure.json'))).stage).toBe('native');
-    expect((await readFile(setup.calls, 'utf8')).trim().split('\n')).toHaveLength(1);
+    expect(await exists(setup.calls)).toBe(false);
     expect(await exists(path.join(setup.directory, 'artifacts.json'))).toBe(false);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
 });
@@ -189,4 +207,21 @@ for (const legacyMessage of ['Actual Android UI checks failed (null). PASS launc
     expect(first.schema.properties.passed).toBeDefined();
     expect(await exists(path.join(setup.directory, 'harness-retry.json'))).toBe(true);
   } finally { if (previous === undefined) delete process.env.MELD_CLAUDE_BIN; else process.env.MELD_CLAUDE_BIN = previous; await setup.api.close(); }
+});
+
+for (const legacyStage of ['review', undefined]) test(`an old source-only review is rechecked with device evidence: ${legacyStage || 'legacy missing stage'}`, async () => {
+  const setup = await fixture(true), previous = process.env.MELD_CLAUDE_BIN;
+  process.env.MELD_CLAUDE_BIN = setup.cli;
+  const directory = path.join(path.dirname(setup.directory), setup.input.project.latestBuild!.id);
+  try {
+    const rejection = { passed:false, issues:['[blocking] Estimated layout may hide Plant.'], acceptanceTests:['Measure the real phone viewport.'] };
+    await write(path.join(directory,'failure.json'),{...(legacyStage ? {stage:legacyStage,round:0} : {}),issues:rejection.issues});
+    await write(path.join(directory,'review-0.json'),rejection);
+    await expect(setup.runner(setup.input)).rejects.toMatchObject({code:'model_output'});
+    expect(await exists(path.join(setup.directory,'review-evidence-recheck.json'))).toBe(true);
+    const first=JSON.parse((await readFile(setup.calls,'utf8')).trim().split('\n')[0]);
+    expect(first.schema.properties.passed).toBeDefined();
+    expect((await json(path.join(setup.directory,'review-runtime-context-0.json'))).runtimeEvidence.report.passed).toBe(true);
+    expect(await exists(path.join(setup.directory,'artifacts.json'))).toBe(false);
+  } finally { if(previous===undefined)delete process.env.MELD_CLAUDE_BIN;else process.env.MELD_CLAUDE_BIN=previous;await setup.api.close(); }
 });

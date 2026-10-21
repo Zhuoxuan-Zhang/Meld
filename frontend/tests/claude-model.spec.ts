@@ -94,11 +94,14 @@ process.stdout.write(JSON.stringify({type:'turn.completed',usage:{input_tokens:1
 `, { mode: 0o755 });
     process.env.PATH = bin + path.delimiter + previous.PATH;
     process.env.MELD_BUILD_PROVIDER = "codex_cli"; process.env.MELD_CODEX_BUILD_MODEL = "fixture-codex";
-    const result = await buildModelJson(directory, "build", "Preserve every approved tool operation.", { scope: "fixture" }, z.object({ ready: z.boolean(), removePaths: z.array(z.string()).default([]) }).strict());
+    const image = path.join(directory, "native-evidence.png");
+    await writeFile(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=", "base64"));
+    const result = await buildModelJson(directory, "build", "Preserve every approved tool operation.", { scope: "fixture" }, z.object({ ready: z.boolean(), removePaths: z.array(z.string()).default([]) }).strict(), 16000, "medium", 600000, [image]);
     expect(result).toEqual({ ready: true, removePaths: [] });
     const captured = JSON.parse(await readFile(input, "utf8"));
     expect(captured.prompt).toContain("Preserve every approved tool operation."); expect(captured.prompt).toContain('"scope":"fixture"');
     expect(captured.args[captured.args.indexOf("--model") + 1]).toBe("fixture-codex");
+    expect(captured.args[captured.args.indexOf("--image") + 1]).toBe(image);
     const call = (await readdir(directory)).find(name => name.startsWith("build-"))!;
     expect(JSON.parse(await readFile(path.join(directory, call, "response.json"), "utf8")).provider).toBe("codex_cli");
     process.env.MELD_BUILD_PROVIDER = "unsupported";

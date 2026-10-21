@@ -141,12 +141,39 @@ export async function generateSources(directory: string, round: number, instruct
   }
   const checkpoint = path.join(directory, "generation-checkpoint.json");
   const resumed = await exists(checkpoint) ? z.object({ plan: Plan, files: z.array(SourceFile).max(16) }).strict().parse(await json(checkpoint)) : null;
-  const plan = resumed?.plan || await ask(directory, "source-plan", instructions + " Plan a small implementation using only as many focused Kotlin files as the approved scope needs, typically 4–16. Keep each file small enough to generate reliably: aim for 800–1800 output tokens and roughly 80–160 lines. Split a large coordinator into focused helpers and UI into small tool panels rather than putting every event and operation into one reducer. Return the ordered file manifest and exact shared type/function signatures. Put common pure types first, domain logic next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. MainActivity.kt must be present. Split large UI implementations into separate feature screens or panels. Include every approved feature and the base app’s primary workflow. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration.", data, Plan, planExecutionBudget, "medium");
-  checkSourcePaths(plan.files.map(file => ({ path: file.path, content: "planned" })));
-  if (!plan.files.some(file => file.path === "app/src/main/java/generated/MainActivity.kt") || !plan.files.some(file => file.path.startsWith("app/src/test/"))) throw new WorkbenchError("invalid_code", "The source plan must include a launcher and tests.", 422);
+  let plan = resumed?.plan;
+  let rejectedPlan: z.infer<typeof Plan> | undefined;
+  let validationError: string | undefined;
+  const validatePlan = (candidate: z.infer<typeof Plan>) => {
+    checkSourcePaths(candidate.files.map(file => ({ path: file.path, content: "planned" })));
+    if (!candidate.files.some(file => file.path === "app/src/main/java/generated/MainActivity.kt") || !candidate.files.some(file => file.path.startsWith("app/src/test/java/generated/"))) throw new WorkbenchError("invalid_code", "The source plan must include app/src/main/java/generated/MainActivity.kt and meaningful tests under app/src/test/java/generated/.", 422);
+  };
+  if (plan) {
+    try { validatePlan(plan); }
+    catch (error) {
+      if (resumed?.files.length || (error as WorkbenchError).code !== "invalid_code") throw error;
+      rejectedPlan = plan; validationError = (error as Error).message; plan = undefined;
+      await write(path.join(directory, `rejected-source-plan-${Date.now()}.json`), { plan: rejectedPlan, validationError });
+    }
+  }
+  let planRetries = 0;
+  for (let attempt = 0; !plan && attempt < 3; attempt++) {
+    const label = rejectedPlan ? `source-plan-validation-retry-${++planRetries}` : "source-plan";
+    const candidate = Plan.parse(await ask(directory, label, instructions + " Plan a small implementation using only as many focused Kotlin files as the approved scope needs, typically 4–16. This response is a manifest only: each responsibility is a short prose sentence, never Kotlin source or a truncated implementation. Return concise exact shared signatures in interfaces without function bodies. Keep each eventual file small enough to generate reliably: aim for 800–1800 output tokens and roughly 80–160 lines. Put common pure types first, domain logic next, storage/coordinator after them, UI last, and meaningful pure JUnit tests after implementations. Include app/src/main/java/generated/MainActivity.kt and tests under app/src/test/java/generated/. Split large UI implementations into separate feature screens or panels. Include every approved feature and the base app’s primary workflow. Avoid speculative abstractions and dependencies unavailable in the supplied Gradle configuration." + (rejectedPlan ? " Correct the supplied rejected plan against its validation error. Return the complete concise manifest, preserving all approved features; source contents are generated in later calls." : ""), { ...data, ...(rejectedPlan ? { rejectedPlan, validationError } : {}) }, Plan, planExecutionBudget, "medium"));
+    try { validatePlan(candidate); plan = candidate; }
+    catch (error) {
+      if ((error as WorkbenchError).code !== "invalid_code") throw error;
+      rejectedPlan = candidate; validationError = (error as Error).message;
+      await write(path.join(directory, `rejected-source-plan-${attempt}-${Date.now()}.json`), { plan: candidate, validationError });
+      if (attempt === 2) throw error;
+      await progress("Correcting the app source plan…");
+    }
+  }
+  if (!plan) throw new WorkbenchError("invalid_code", "The app source plan did not validate.", 422);
   const files: Sources["files"] = resumed?.files || [];
   checkSourcePaths(files);
   if (files.some((file, index) => file.path !== plan.files[index]?.path)) throw new WorkbenchError("invalid_code", "The generation checkpoint does not match its ordered module plan.", 422);
+  await write(checkpoint, { plan, files });
   for (const [index, file] of plan.files.entries()) {
     if (index < files.length) continue;
     await progress(`Implementing app module ${index + 1} of ${plan.files.length}…`);

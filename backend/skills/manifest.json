@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "stage": "coding",
+  "toolchain": {
+    "compileSdk": 35,
+    "composeBom": "2025.05.01",
+    "navigation3": false
+  },
+  "upstream": {
+    "repository": "https://github.com/android/skills",
+    "commit": "95ea931a1ad8f9b2be132ae0cfb2aad964d71118",
+    "license": "upstream/LICENSE.txt"
+  },
+  "skills": [
+    {
+      "id": "edge-to-edge",
+      "profile": "edge-to-edge.md",
+      "source": "https://github.com/android/skills/tree/95ea931a1ad8f9b2be132ae0cfb2aad964d71118/system/edge-to-edge"
+    },
+    {
+      "id": "adaptive",
+      "profile": "adaptive.md",
+      "source": "https://github.com/android/skills/tree/95ea931a1ad8f9b2be132ae0cfb2aad964d71118/jetpack-compose/adaptive"
+    },
+    {
+      "id": "jetpack-compose-performance",
+      "profile": "jetpack-compose-performance.md",
+      "source": "https://github.com/android/skills/tree/95ea931a1ad8f9b2be132ae0cfb2aad964d71118/jetpack-compose/jetpack-compose-performance"
+    }
+  ],
+  "files": {
+    "adaptive.md": "27413c420e463f8bfd5a059f1dc2f28285df4e6f4550593a8c05b159f6cb839d",
+    "edge-to-edge.md": "fbac40a14faa9e491cac6e495ec53784b792ab67de67fa3361007ebb81468032",
+    "jetpack-compose-performance.md": "05e46663118b29d14cabd340c9ed17908561af378cdbc8451ed0e6a265c5a351",
+    "upstream/LICENSE.txt": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "upstream/adaptive/SKILL.md": "c3dd9b3d3acf484b356e7917a48347f4db87bcade40652430ce381881ad77a5a",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/flexbox/container-behavior.md": "7a33b15b827dbf21557a2ac808d3e0c2653cf33cc4c58277f2eb94ebfa41aa5f",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/flexbox/get-started.md": "96d7b258143455e885aaed6c00fa18781d59270b67f7af0eb18e78906a5d75cf",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/flexbox/index.md": "952ca4608d36dcb0db9a36aed865f9cdb5e85583480cd85e9e364327be460ecb",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/flexbox/item-behavior.md": "94e894a59857662ed784913774a4d0c5bcec7d16468c4c910962a7d806a0e562",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/grid/container-properties.md": "fb12005053f5f040c26c5b74a93c11825d5a27f1802ec7748859b24ee2c030c7",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/grid/get-started.md": "4c5b1f55874f979005bfa96c47366bb9f800d506d1717cf3b79b4bdb35c34332",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/grid/index.md": "f6fb9a8d962dc7053fa5a1a20234d96fd0eeb9d4252fc98c40826353816815ab",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/grid/item-properties.md": "ef0a67039918022d01ac26983b3cc06c798050736d42ffe692c98e3c4517b45a",
+    "upstream/adaptive/references/android/develop/ui/compose/layouts/adaptive/mediaquery/index.md": "1e79df59c053569d5376a618c414b793670fdf35e337d7c8aecce81bf09f90d7",
+    "upstream/adaptive/references/android/guide/navigation/navigation-3/recipes/material-listdetail.md": "e4781cf0fc691f92c202400a07ebc80424666681f9547e757f660388252cdb29",
+    "upstream/adaptive/references/android/guide/navigation/navigation-3/save-state.md": "88f4e8e8831368f58fba9dc28f2cb40a0dcf0a627df5c09eb5b2a837486f9d6f",
+    "upstream/adaptive/references/android/studio/preview/compose-screenshot-testing-with-testsuites.md": "4b4ada7a50201bcf9ab90b0d9f00cc2ceb16513d1de7f63c12d634318a2ec20d",
+    "upstream/edge-to-edge/SKILL.md": "4ca04cb6a5330b96e51410bc815f878b4ca642fba46fe5e1ad724c94e04d6eb8",
+    "upstream/jetpack-compose-performance/SKILL.md": "e0c47467b828c8750951a79fd4dba996efd059942ff8fe815c7c073da593f503",
+    "upstream/jetpack-compose-performance/references/android/develop/ui/compose/custom-modifiers.md": "b4ede8f37dc56c54f3621a5ad21f91a649450a9854bc1bacc1a24eb65fe31b38",
+    "upstream/jetpack-compose-performance/references/android/develop/ui/compose/performance/backwards-write.md": "1b57e441da65b8e14a495709d404df5414fa3ba71f4948160b794a505771ed5e",
+    "upstream/jetpack-compose-performance/references/android/develop/ui/compose/performance/stability/strongskipping.md": "d1352185c164e5debc6cd53c816913f2cb20618d3fcdede8a6b4980bf33c0fd6",
+    "upstream/jetpack-compose-performance/references/animation.md": "0951013832d4e448f239144b8b7e3b8c43c2a6b505cecd69dff3804fb269ec2f",
+    "upstream/jetpack-compose-performance/references/effects-and-threading.md": "6bd1aa73b0567a1f980c601582bb5031d8c5751565a3dab10e57f686f6efb8c3",
+    "upstream/jetpack-compose-performance/references/graphics-performance.md": "b01f635b4b686ee5e6a4a45fe37615a19eae98770a44e1ce363e27d41270e41a",
+    "upstream/jetpack-compose-performance/references/layouts.md": "05b2b55e1e0cc074627ef0e223408b87dba0fe1beb9fa2516de46b4243cd87ab",
+    "upstream/jetpack-compose-performance/references/lazy-layouts.md": "68a0a4f43d311e4d57238ce745d0de775b1948748ab462608d5cbfe8f07b9bfe",
+    "upstream/jetpack-compose-performance/references/state-and-stability.md": "46aff96f166d19d1b2f5510c35679a0efac4fe9f578b4a1e186f5017a696ba37"
+  }
+}

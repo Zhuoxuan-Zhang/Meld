@@ -1,0 +1,4 @@
+interface:
+  display_name: "Base App UI Design"
+  short_description: "Ground proposed UI in observed base-app screens"
+  default_prompt: "Design the approved app around its base UI evidence."

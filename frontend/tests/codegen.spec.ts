@@ -366,3 +366,37 @@ test("substantial rewrites use complete contents without duplicating old text an
     expect(prior.files[0].content).toBe("old source");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("initial source plans repair invalid manifests before generating modules", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-source-plan-"));
+  const calls: { label: string; data: any }[] = [];
+  const invalid = { interfaces: [], files: [{ path: "app/src/main/java/generated/Types.kt", responsibility: "types" }, { path: tests, responsibility: "tests" }] };
+  const valid = { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: tests, responsibility: "domain tests" }] };
+  const ask: any = async (_dir: string, label: string, _instructions: string, data: any) => {
+    calls.push({ label, data });
+    if (label === "source-plan") return invalid;
+    if (label.startsWith("source-plan-validation-retry")) return valid;
+    return { path: data.requestedFile.path, content: "generated production/test source" };
+  };
+  try {
+    const result = await generateSources(directory, 0, "", {}, null, [], async () => {}, ask);
+    expect(calls.map(c => c.label)).toEqual(["source-plan", "source-plan-validation-retry-1", "file-0", "file-1"]);
+    expect(calls[1].data.rejectedPlan).toEqual(invalid);
+    expect(calls[1].data.validationError).toContain("MainActivity.kt");
+    expect(result.files.map(f => f.path)).toEqual([main, tests]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("invalid source plans stop after three attempts without generating source files", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "meld-source-plan-bound-"));
+  const labels: string[] = [];
+  const ask: any = async (_dir: string, label: string) => {
+    labels.push(label);
+    return { interfaces: [], files: [{ path: main, responsibility: "launcher" }, { path: main, responsibility: "duplicate launcher" }] };
+  };
+  try {
+    await expect(generateSources(directory, 0, "", {}, null, [], async () => {}, ask)).rejects.toMatchObject({ code: "invalid_code" });
+    expect(labels).toHaveLength(3);
+    expect(labels.every(label => label.startsWith("source-plan"))).toBe(true);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

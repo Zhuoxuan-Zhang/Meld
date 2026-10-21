@@ -1,2 +1,5 @@
 # Unified patches require a space prefix on empty context lines.
 frontend/patches/*.patch whitespace=-blank-at-eol
+
+# Preserve checksum-bound upstream skill snapshots verbatim.
+backend/skills/upstream/** -whitespace

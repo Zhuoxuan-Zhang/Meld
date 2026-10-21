@@ -28,9 +28,10 @@ export async function modelJson<T>(directory: string, label: string, instruction
     throw new WorkbenchError("model_output", "The model response could not be validated. Your saved project is unchanged; retry the step.", 502); }
 }
 
-export async function buildModelJson<T>(directory: string, label: string, instructions: string, data: unknown, schema: z.ZodType<T>, outputLimit = 16000, reasoningEffort = "medium", timeout = 600000): Promise<T> {
+export async function buildModelJson<T>(directory: string, label: string, instructions: string, data: unknown, schema: z.ZodType<T>, outputLimit = 16000, reasoningEffort = "medium", timeout = 600000, evidenceImages: string[] = []): Promise<T> {
   const provider = process.env.MELD_BUILD_PROVIDER || "claude_cli";
   if (provider !== "claude_cli" && provider !== "codex_cli") throw new WorkbenchError("model_configuration", "Choose a supported build model provider.", 503);
   const model = provider === "codex_cli" ? process.env.MELD_CODEX_BUILD_MODEL || "gpt-6.1-sol" : process.env.MELD_CLAUDE_BUILD_MODEL || process.env.MELD_CLAUDE_MODEL || "claude-sonnet-5";
-  return modelJson(directory, label, instructions, data, schema, outputLimit, reasoningEffort, timeout, model, undefined, provider, await baseUiImages((data as any)?.approvedDesign?.brief?.market_signals?.base_ui));
+  const images = [...await baseUiImages((data as any)?.approvedDesign?.brief?.market_signals?.base_ui), ...evidenceImages];
+  return modelJson(directory, label, instructions, data, schema, outputLimit, reasoningEffort, timeout, model, undefined, provider, images);
 }

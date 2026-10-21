@@ -41,6 +41,7 @@
   "files": [
     "dist/src",
     "prompts",
-    "config"
+    "config",
+    "skills"
   ]
 }
