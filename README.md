@@ -23,18 +23,6 @@
 
 Two ideas, two bases, two working Android apps. Each animation compares the base with the generated result; click through for the full video.
 
-### Focus Grove · study with a growing tree
-
-[![Forest reference UI and generated Focus Grove app](frontend/public/demos/focus-grove-preview.gif)](frontend/public/demos/focus-grove.mp4)
-
-**Base: [Forest](https://www.forestapp.cc/)** — keep the plant → focus → grow loop and a tree-centered screen.
-
-**Borrow from:** Focus To-Do for tasks, Tide for sound controls, Loop for daily goals, Focusmeter for task-level stats.
-
-**The proposal:** pick a study task, grow a tree, then see that task’s focus time against your daily goal.
-
-[▶ Full video](frontend/public/demos/focus-grove.mp4) · [Design & checks](docs/focus-grove-example.md) · [Source](examples/focus-grove/)
-
 ### Pocket Ledger · try a purchase first
 
 [![Cashew and generated Pocket Ledger running on Android](frontend/public/demos/pocket-ledger-preview.gif)](frontend/public/demos/pocket-ledger.mp4)
@@ -46,6 +34,18 @@ Two ideas, two bases, two working Android apps. Each animation compares the base
 **The proposal:** preview a purchase’s effect on your category balance and daily allowance. Cancel without saving, or record it once.
 
 [▶ Full video](frontend/public/demos/pocket-ledger.mp4) · [Design & checks](docs/pocket-ledger-example.md) · [Source](examples/pocket-ledger/)
+
+### Focus Grove · study with a growing tree
+
+[![Forest reference UI and generated Focus Grove app](frontend/public/demos/focus-grove-preview.gif)](frontend/public/demos/focus-grove.mp4)
+
+**Base: [Forest](https://www.forestapp.cc/)** — keep the plant → focus → grow loop and a tree-centered screen.
+
+**Borrow from:** Focus To-Do for tasks, Tide for sound controls, Loop for daily goals, Focusmeter for task-level stats.
+
+**The proposal:** pick a study task, grow a tree, then see that task’s focus time against your daily goal.
+
+[▶ Full video](frontend/public/demos/focus-grove.mp4) · [Design & checks](docs/focus-grove-example.md) · [Source](examples/focus-grove/)
 
 <details>
 <summary>About the comparisons</summary>
