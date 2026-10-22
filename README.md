@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/images/meld-agent.svg" alt="Meld: idea → real references → product proposal → editable design → working Android app" width="100%">
-</p>
+[![Meld in motion: an idea becomes references, a proposal, an editable design and a working Android app](docs/images/meld-agent.gif)](docs/project-workflow.md)
 
 <p align="center">
   <strong>An app proposal agent that turns inspiration into an app you can use.</strong><br>
@@ -8,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="#see-what-it-builds">Watch the demos</a> · <a href="#try-it">Try it locally</a> · <a href="docs/project-workflow.md">How it works</a>
+  <a href="#see-what-it-builds">Watch the demos</a> · <a href="#try-it">Try it locally</a> · <a href="docs/project-workflow.md">How it works</a> · <a href="docs/images/meld-agent.svg">Static overview</a>
 </p>
 
 ## From inspiration to your own app
