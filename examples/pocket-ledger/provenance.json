@@ -1,0 +1,52 @@
+{
+  "projectId": "project-a92b60ad-6e5a-445d-94f4-4b0f5d2c6064",
+  "buildId": "job-c087b2b4-33c6-4a90-9dff-dc4a28435d7e",
+  "revision": "v0001-1a005a68",
+  "apkSha256": "090234c0ec7eb3e9471263f20fd7283659b4edb1fef0708c540abe88ec880113",
+  "packageId": "com.meld.apps.p6e5a445d94f44b0f5d2c6064",
+  "sourceMatchesModelOutput": true,
+  "validation": {
+    "build": true,
+    "unitTests": true,
+    "lint": true,
+    "runtimeVerified": true,
+    "visualVerified": false,
+    "limitations": [
+      "Native smoke interactions passed on the recorded Android emulator. Other devices and all failure paths are not covered.",
+      "Implementation review used the recorded candidate screenshots. Matching original-app runtime screenshot comparison was not configured.",
+      "[follow-up] Compact Insights proportions diverge from the reference: the captured Current period card stacks a large ring below its text, pushing category budgets below both period cards. Reduce auxiliary period-summary space while retaining readable amounts and the approved chart/ring/category hierarchy.",
+      "[follow-up] LedgerViewModel.change serializes the complete session to JSON on the main thread for every field edit and scroll-position emission. Coalesce scroll persistence and move avoidable serialization work off the main thread while preserving restoration.",
+      "[follow-up] An already-open sandbox has no date-change refresh trigger. After midnight, its displayed comparison can remain based on yesterday until another recomposition, while Record correctly reconciles against today's date. Refresh the comparison on resume and date rollover.",
+      "[follow-up] Failed-write Retry retains the original command even after the user edits the draft. Retry can therefore save earlier values instead of the currently displayed input. Clear or rebuild the retry command when editable values change, preserving the operation identity.",
+      "[follow-up] Device evidence covers one API 33 emulator and the recorded scenes. Landscape with the keyboard open, 200% text scaling, API 35 system bars, theme persistence and interrupted-write recreation remain unverified; source inspection alone does not establish their rendered behavior."
+    ]
+  },
+  "sourceSha256": {
+    "app/build.gradle.kts": "3cd1dd6998131e8f8a443a8544818b3e75875101342818544408e32b03f90318",
+    "app/schemas/generated.LedgerDatabase/1.json": "e42800d6a938854bb086390b1586d23f143ad41922c1f4ade9cd854259964d63",
+    "app/src/main/AndroidManifest.xml": "f352db41c8db3d4425879590a88ab38e99c0a547c8fa58502076b806f94553a3",
+    "app/src/main/java/generated/CalendarScreens.kt": "19848e85addfee5e693066c4d3f1aa48c7c7e08e578eb4fda94050ab12fe30a5",
+    "app/src/main/java/generated/EditorScreens.kt": "4796324e0c0fff51dd55448337616bf336b17f0e75c845e714f10ac7ffa7c3e7",
+    "app/src/main/java/generated/FinanceCharts.kt": "9a5acefa279626cf1f98db60dfd95f74cbc3bc070a11a0f8d4d49358e8c3963c",
+    "app/src/main/java/generated/HomeScreen.kt": "4e6fa474919d9298ab464f96705de6e3fd916cda02d6a0e0210775cd113979ec",
+    "app/src/main/java/generated/InsightsScreen.kt": "5c789805fb4ca84a497618866d5d738c31c69e60eb6974999c2ab73d6b007870",
+    "app/src/main/java/generated/LedgerComponents.kt": "07389e506abb03b40764a6d690945f63d99295de91913d6af16ac56183e3a754",
+    "app/src/main/java/generated/LedgerDatabase.kt": "6f065051ed2ecbf8fe83fcd09baf93019e6620352a01784b969052c91a8d7af2",
+    "app/src/main/java/generated/LedgerRules.kt": "5091ea90c5253e8fe38dac35ec39618ce9077de29cd5e4a6067445597954bff7",
+    "app/src/main/java/generated/LedgerTheme.kt": "f4a8b049b9c47ef106c9666c30594c5e8d6d96494885f2b0c6a905b96f86087f",
+    "app/src/main/java/generated/LedgerViewModel.kt": "091e5823ff9a93c0703aee6baba602a4d9f0a538120d1b2d382aa73918557edd",
+    "app/src/main/java/generated/LocalLedgerRepository.kt": "a2cbb3a773c7902a49eb1087488071d1233599750bd481fb7bf118ec4103e1f5",
+    "app/src/main/java/generated/MainActivity.kt": "47b09d66f21e52bad972f676845b7ac77bf04d279c0df6283970f3dc645481bf",
+    "app/src/main/java/generated/Models.kt": "ab5acf3f4db397536b5b3863eeea9b61b4052688130a4ca55ba45d6a73a61e8b",
+    "app/src/main/java/generated/PurchaseSandboxScreen.kt": "3046151edb5f1313e892401f71007cd609d6ff467f31dba7c334464915d7ce73",
+    "app/src/main/java/generated/SessionState.kt": "0ce4cb6a83d7be20efb942c248e49d5896ab0863be06f1cf2dceec8065244fd8",
+    "app/src/main/res/xml/meld_file_paths.xml": "d795993ab7d9dc2f83c1743924d16580538dd01a4bc26e322b1d03a07c9fe299",
+    "app/src/test/java/generated/LedgerLogicTest.kt": "8656240b985056711b0f7132438aeaab27992ae2e8624ff01211bcdd674d7bd8",
+    "build.gradle.kts": "e4829210a93a8c25f61869db508b4ba54a34bbb63a98ba9d669c8ad669236d0e",
+    "gradle/wrapper/gradle-wrapper.jar": "2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046",
+    "gradle/wrapper/gradle-wrapper.properties": "3256e6a4bacbb04787b346d74b418734b03246092a15703cf2acd926c4b00e90",
+    "gradle.properties": "812af58c7fe21273b9c59ea2e22ec17423a5ca503fa590758bab7b08104bfb64",
+    "gradlew": "a3648413b47ef77af21d5ebc36c687c7d103aaef3e17f33de7d4f080a6f300a3",
+    "settings.gradle.kts": "ff620190cec4d1bdbf6e3b81d7290fd6935329ac9c657f638b4cff39e67bcbe3"
+  }
+}

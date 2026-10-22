@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Meld — From a familiar app to your own</title>
+  <meta name="description" content="Compare Forest with Focus Grove, and Cashew with Pocket Ledger. See the shared foundation and the proposed adaptations in actual Android demos.">
+  <style>
+    :root{font-family:Inter,system-ui,sans-serif;color:#243b2d;background:#f8f7f2;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:36px 24px 70px}a{color:#246b49;text-underline-offset:4px}a:focus-visible,video:focus-visible{outline:3px solid #ad522f;outline-offset:5px}.brand{font-weight:800;text-decoration:none;font-size:24px}.eyebrow{font-size:12px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;color:#657566;margin-top:60px}h1{font-size:clamp(32px,5vw,58px);letter-spacing:-.045em;line-height:1.08;max-width:800px;margin:18px 0}header>p:last-child{font-size:19px;line-height:1.65;max-width:760px;color:#59675d}article{background:white;border:1px solid #dfe5dc;border-radius:22px;padding:28px;margin-top:34px}h2{font-size:29px;margin:0 0 10px;letter-spacing:-.03em}p{line-height:1.7;color:#59675d}video{display:block;width:100%;aspect-ratio:8/5;background:#f8f7f2;border-radius:14px;margin:23px 0}video::cue{background:#203b2d;color:white}.details{display:grid;grid-template-columns:1fr 1fr;gap:26px}.label{font-weight:750;color:#2b7451;font-size:13px;text-transform:uppercase;letter-spacing:.05em}.addition .label{color:#ad522f}.details p{margin:8px 0}.actions{display:flex;flex-wrap:wrap;gap:13px;margin-top:23px}.button{display:inline-block;background:#246b49;color:white;border-radius:24px;text-decoration:none;padding:12px 20px;font-size:14px;font-weight:650}.secondary{background:#eff4ed;color:#246b49}.source{font-size:13px;margin:24px 0 0}footer{font-size:13px;margin-top:35px;color:#657566}@media(max-width:600px){main{padding:24px 14px 40px}article{padding:18px}.details{grid-template-columns:1fr;gap:15px}.eyebrow{margin-top:36px}h2{font-size:25px}}
+  </style>
+</head>
+<body><main>
+  <a class="brand" href="/">Meld.</a>
+  <header><p class="eyebrow">Real references. Your product.</p><h1>A familiar foundation.<br>A useful next step.</h1><p>Choose a base app, propose focused improvements, review the design, and try the Android app. These comparisons show what we kept and what we adapted.</p></header>
+  <article aria-labelledby="focus-title">
+    <h2 id="focus-title">Focus Grove</h2><p>Forest's tree-growing focus loop, shaped around your study tasks.</p>
+    <video controls preload="metadata" playsinline poster="focus-grove-poster.jpg" aria-label="Forest and Focus Grove comparison video"><source src="focus-grove.mp4" type="video/mp4"><track default kind="captions" src="focus-grove.vtt" srclang="en" label="English descriptions">Your browser does not support video. <a href="focus-grove.mp4">Download the comparison</a>.</video>
+    <div class="details"><div><span class="label">Shared foundation · Forest</span><p>Plant, focus, grow and collect. The circular tree scene, sounds and focus statistics are shared capabilities; they are not claimed additions.</p></div><div class="addition"><span class="label">Proposed adaptation</span><p>A lightweight task list inspired by Focus To-Do, linked to focus sessions, task completion and a custom daily minute target. Tide, Loop and Focusmeter inform the supporting controls.</p></div></div>
+    <div class="actions"><a class="button" data-project-name="Focus Grove" href="/">Create a similar app</a><a class="button secondary" href="focus-grove.mp4" download>Download video</a></div>
+    <p class="source">Forest: store UI screenshots. Focus Grove: actual generated APK captures; a real one-minute session is condensed in the comparison. The artwork is simpler than Forest's. <a href="https://www.forestapp.cc/">Base app</a></p>
+  </article>
+  <article aria-labelledby="budget-title">
+    <h2 id="budget-title">Pocket Ledger</h2><p>A Cashew-inspired expense tracker. Try a purchase before you record it.</p>
+    <video controls preload="metadata" playsinline poster="pocket-ledger-poster.jpg" aria-label="Cashew and Pocket Ledger comparison video"><source src="pocket-ledger.mp4" type="video/mp4"><track default kind="captions" src="pocket-ledger.vtt" srclang="en" label="English descriptions">Your browser does not support video. <a href="pocket-ledger.mp4">Download the comparison</a>.</video>
+    <div class="details"><div><span class="label">Shared foundation · Cashew</span><p>Rounded pastel cards, money-first totals, transaction history, category budgets and daily allowance. Money Manager and Wallet inform calendar drill-down and clear budget breakdowns.</p></div><div class="addition"><span class="label">Proposed workflow</span><p>Preview a purchase's before-and-after impact on category balance and daily allowance. Trying it changes no transactions. Record it once only when you explicitly confirm.</p></div></div>
+    <div class="actions"><a class="button" data-project-name="Pocket Ledger" href="/">Create a similar app</a><a class="button secondary" href="pocket-ledger.mp4" download>Download video</a></div>
+    <p class="source">Both sides use actual Android APK captures. Cashew 5.3.4 uses its own built-in demo sample data. Pocket Ledger is an offline USD demo; bank sync and cloud accounts are outside its scope. <a href="https://github.com/jameskokoska/Cashew">Base app</a></p>
+  </article>
+  <footer>Videos are edited comparisons, with source types identified on screen. <a href="provenance.json">Capture provenance</a> · <a href="https://github.com/Zhuoxuan-Zhang/new_app_agent">Repository and setup</a></footer>
+</main>
+<script>
+fetch('/api/status').then(response => response.ok ? response.json() : null).then(status => {
+  const examples = status?.featuredProjects ?? (status?.featuredProject ? [status.featuredProject] : []);
+  for (const link of document.querySelectorAll('[data-project-name]')) {
+    const project = examples.find(item => item.name === link.dataset.projectName);
+    if (project && /^project-[a-f0-9-]{36}$/.test(project.id)) {
+      link.href = '/?project=' + encodeURIComponent(project.id);
+      link.textContent = 'Open ' + project.name;
+    }
+  }
+}).catch(() => {});
+</script>
+</body></html>

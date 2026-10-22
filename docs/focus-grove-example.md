@@ -2,6 +2,10 @@
 
 The example uses Forest (`cc.forestapp`) as its sole base and UI foundation. Four selected references contribute specific enhancements; they do not replace that base.
 
+Watch the [base/app comparison video](../frontend/public/demos/focus-grove.mp4) or open `/demos/index.html` on the running website. Forest appears as store UI references; the generated side is the actual APK. The video includes a real one-minute session condensed to 5× speed, task completion and task statistics.
+
+Reference attribution does **not** mean Forest lacks the feature. Forest already offers ambient sounds, focus analytics, custom tags and streaks ([official feature overview](https://www.forestapp.cc/)). The demo's proposed adaptation is its lightweight editable/completable study-task list and custom focus-minute-goal integration. Tide/Loop/Focusmeter guide supporting behavior; their broad sound/statistics/streak capabilities overlap with the base. The candidate artwork remains simpler than Forest's; implementation tests do not establish equivalent visual quality.
+
 | Reference | Selected contribution |
 | --- | --- |
 | Forest | Plant, focus, grow and collect trees; top utility bar, central circular tree and timer, forest overview |

@@ -1,0 +1,212 @@
+{
+  "formatVersion": 1,
+  "renderer": "scripts/demos/render-comparisons.py",
+  "videos": [
+    {
+      "id": "focus-grove",
+      "title": "From Forest to Focus Grove",
+      "base": "Forest",
+      "baseEvidence": "Store UI reference (not runtime)",
+      "baseCapture": {
+        "kind": "Google Play store screenshots",
+        "sourceUrls": [
+          "https://play-lh.googleusercontent.com/U1B2XpcjIIXMUIiLeRG7tPFC7hUFpZShWma-JhmYQ0lri0Hmap-NAFeqjCVk1vDgNrV4F0-jV2bgZp1s2Fl5PA",
+          "https://play-lh.googleusercontent.com/Rpk6BZcoLv0VYyMsc1gKqskYgDCpWwyA5M2KBmAkNHG54azq8CYtknhNZIs6L_rLRGcSMBzNtDumNivOLppulw",
+          "https://play-lh.googleusercontent.com/-Yl0O67ZGxqc6n8SnIIWXueP-YrmKHgysXXZPoENW7SBpwEnXRPWKUH600G_bJKQE5WOvTPssCYxq9LJ1RwZ1g",
+          "https://play-lh.googleusercontent.com/RuciKAbLRnfLguxHWil2OPGhRXU4B5YxwwVICo7qaoVEUrVDxZmUT2d8XJWMdd9pFZoNNyaQEdX91-CM0MI1Kw"
+        ],
+        "originalRuntimeAvailable": false
+      },
+      "captureContext": {
+        "serial": "emulator-5580",
+        "api": 33,
+        "display": "480x960",
+        "recordedAt": "2026-10-22",
+        "originalAppRuntimeAvailable": false
+      },
+      "app": "Focus Grove",
+      "apkSha256": "6fa97d885f2569cba3455a26929df890aa0c6157170a3edd35af02cf98e48e86",
+      "sourceSha256": {
+        "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-1.jpg": "beafa093e75a76f2ca85c4d5fb7d08ebe62900cf792bfd3746d4187ce4e2eb7e",
+        "outputs/forest-example/video-device/home-one-minute.png": "b8604a660b807aa080be88fbe06dfe6ad5445726ca7db6a6f6b12a13a7d47e8d",
+        "outputs/forest-example/video-device/focus-grove-actual.mp4": "452f95237d35178212dbd45f8923ae7e6369e6b2c3a999c20b09369e1ddbf4d2",
+        "outputs/forest-example/video-device/focus-tasks-actual.mp4": "2c082c4797f5eccbe06bdae5208537f006db75d394c59db4de2ca8b839e3dec4",
+        "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-3.jpg": "8cb9ddb0e51651d430d0452216aead0f4a9eed41d569929850af886dec35d72d",
+        "outputs/forest-example/video-device/stats-current.png": "5328432e36d30eb82ec450d958c5c61fa1a52e3499ee56b1cb745e2627554588"
+      },
+      "outputSha256": "a8dd3fe95bc6718b86078443e893018884e3fa35aa90845c570b0ea132354369",
+      "durationSeconds": 45,
+      "encoding": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 800
+          }
+        ],
+        "format": {
+          "duration": "45.000000"
+        }
+      },
+      "scenes": [
+        {
+          "startSeconds": 0,
+          "durationSeconds": 10,
+          "heading": "Keep the core experience",
+          "kind": "shared",
+          "left": {
+            "path": "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-1.jpg"
+          },
+          "right": {
+            "path": "outputs/forest-example/video-device/home-one-minute.png"
+          }
+        },
+        {
+          "startSeconds": 10,
+          "durationSeconds": 13,
+          "heading": "Watch a real tree grow",
+          "kind": "shared",
+          "left": {
+            "path": "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-1.jpg"
+          },
+          "right": {
+            "path": "outputs/forest-example/video-device/focus-grove-actual.mp4",
+            "start": 0,
+            "speed": 5
+          }
+        },
+        {
+          "startSeconds": 23,
+          "durationSeconds": 12,
+          "heading": "Focus on a named study task",
+          "kind": "addition",
+          "left": {
+            "path": "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-1.jpg"
+          },
+          "right": {
+            "path": "outputs/forest-example/video-device/focus-tasks-actual.mp4",
+            "start": 0
+          }
+        },
+        {
+          "startSeconds": 35,
+          "durationSeconds": 10,
+          "heading": "Review time by task",
+          "kind": "shared",
+          "left": {
+            "path": "frontend/.meld-cache/workflow/base-ui/project-282843ad-103f-4458-9a40-d192b65be2ba/base-ui-d92883f4c6b23d1385d94b8e/screen-3.jpg"
+          },
+          "right": {
+            "path": "outputs/forest-example/video-device/stats-current.png"
+          }
+        }
+      ],
+      "scope": "Forest store screenshots compared with genuine generated APK footage and captures. No original Forest runtime equivalence is claimed. The one-minute timer sequence is shown at 5x; other scenes use real-time footage or still captures. Sounds, statistics and streaks overlap with Forest."
+    },
+    {
+      "id": "pocket-ledger",
+      "title": "From Cashew to Pocket Ledger",
+      "base": "Cashew",
+      "baseEvidence": "Official APK / built-in demo data",
+      "baseCapture": {
+        "packageId": "com.budget.tracker_app",
+        "version": "5.3.4+396",
+        "releaseUrl": "https://github.com/jameskokoska/Cashew/releases/download/5.3.4%2B396/app-release.apk",
+        "apkSha256": "5cdbb5208a62f790a8a2870b30274f74c83a5a5b2f68584fe8fdec829a3e0e55",
+        "installedApkMatchesOfficialDownload": true,
+        "theme": "Green accent selected through the original app Settings",
+        "data": "Built-in original Cashew Preview Demo mode sample transactions",
+        "serial": "emulator-5580",
+        "api": 33,
+        "display": "480x960",
+        "videoSha256": "542a510291d1e3b78cb2b43e30bdffd818e0223f341e18f9bab5eccc8594cb0f"
+      },
+      "captureContext": {
+        "serial": "emulator-5580",
+        "api": 33,
+        "display": "480x960",
+        "recordedAt": "2026-10-22"
+      },
+      "app": "Pocket Ledger",
+      "apkSha256": "090234c0ec7eb3e9471263f20fd7283659b4edb1fef0708c540abe88ec880113",
+      "sourceSha256": {
+        "outputs/budget-example/cashew-base.mp4": "542a510291d1e3b78cb2b43e30bdffd818e0223f341e18f9bab5eccc8594cb0f",
+        "outputs/budget-example/video-device/home-ready.png": "cb5843613d878545eb228cc2883484a442307c254e50be1a84d1f8ffa982a60d",
+        "outputs/budget-example/cashew-budget-detail.png": "a0e7d28152e07ae9a4043468e94d1ecefc61673f5919d847d55599125e8864bc",
+        "outputs/budget-example/video-device/category-breakdown.png": "21390e6f2df3b93022923ebbb2e44325de0b10f545b50614a50c8562caba586f",
+        "outputs/budget-example/cashew-budgets.png": "ac35ade342b5548c81a59819a55e165f2cc19d9dd453df519f2ca800867a6699",
+        "outputs/budget-example/video-device/b-purchase-overbudget.png": "88950d10d89980e8728d9953a20fa98298cc0ac804dda7383bf52ad231fbaabb",
+        "outputs/budget-example/video-device/purchase-record-actual.mp4": "469e5ff38fad2b54b96d00cf1e5b7931c5611a169f4d256b229381bedf592ee5"
+      },
+      "outputSha256": "5a8309e59b472f0f4e6ab0233f8ca3da75212d40b958cdd0e2e620565c26c4cf",
+      "durationSeconds": 48,
+      "encoding": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 800
+          }
+        ],
+        "format": {
+          "duration": "48.000000"
+        }
+      },
+      "scenes": [
+        {
+          "startSeconds": 0,
+          "durationSeconds": 10,
+          "heading": "Keep spending visible",
+          "kind": "shared",
+          "left": {
+            "path": "outputs/budget-example/cashew-base.mp4",
+            "start": 0
+          },
+          "right": {
+            "path": "outputs/budget-example/video-device/home-ready.png"
+          }
+        },
+        {
+          "startSeconds": 10,
+          "durationSeconds": 10,
+          "heading": "Make budget status clear",
+          "kind": "shared",
+          "left": {
+            "path": "outputs/budget-example/cashew-budget-detail.png"
+          },
+          "right": {
+            "path": "outputs/budget-example/video-device/category-breakdown.png"
+          }
+        },
+        {
+          "startSeconds": 20,
+          "durationSeconds": 14,
+          "heading": "Try it before you buy it",
+          "kind": "addition",
+          "left": {
+            "path": "outputs/budget-example/cashew-budgets.png"
+          },
+          "right": {
+            "path": "outputs/budget-example/video-device/b-purchase-overbudget.png"
+          }
+        },
+        {
+          "startSeconds": 34,
+          "durationSeconds": 14,
+          "heading": "Record only when you decide",
+          "kind": "addition",
+          "left": {
+            "path": "outputs/budget-example/cashew-budgets.png"
+          },
+          "right": {
+            "path": "outputs/budget-example/video-device/purchase-record-actual.mp4",
+            "start": 0
+          }
+        }
+      ],
+      "scope": "Both sides are genuine Android APK captures. Cashew 5.3.4+396 uses its own sample-data Preview Demo mode and a green accent selected through Settings. Pocket Ledger records are created through visible UI actions. Shared category budgets and daily allowance are not claimed as new. The proposed purchase sandbox is not a claim of global market uniqueness. Footage and still captures are edited into a comparison; datasets differ."
+    }
+  ]
+}
