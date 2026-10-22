@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="570" viewBox="0 0 1200 570" role="img" aria-labelledby="title desc">
+<title id="title">Meld — Good apps are a starting point.</title>
+<desc id="desc">Describe an idea. Choose a base app and reference features. Meld proposes a focused product, lets you edit the design, and builds an Android app to try. The budget example combines Cashew's visual foundation, calendar and budget references, and a custom purchase preview.</desc>
+<defs>
+  <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#faf7f1"/><stop offset="1" stop-color="#eef3eb"/></linearGradient>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M1 1l4 3-4 3" fill="none" stroke="#8c9c8d" stroke-width="1.5"/></marker>
+</defs>
+<rect width="1200" height="570" rx="24" fill="url(#bg)"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<g fill="none" stroke="#ba4e35" stroke-width="2.5" stroke-linejoin="round"><path d="m46 46 14-7 14 7-14 7z"/><path d="m46 54 14 7 14-7m-28 8 14 7 14-7"/></g>
+<text x="87" y="65" font-size="30" font-weight="700" fill="#25352f">meld<tspan fill="#ba4e35">.</tspan></text>
+<rect x="895" y="38" width="257" height="32" rx="16" fill="#e5ecdf"/>
+<text x="1023" y="59" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="1.2" fill="#46634b">THE APP PROPOSAL AGENT</text>
+<text x="46" y="128" font-size="43" font-weight="700" letter-spacing="-1.4" fill="#25352f">Good apps are a starting point.</text>
+<text x="46" y="164" font-size="20" fill="#5d6b62">Keep what works. Bring ideas together. Build something of your own.</text>
+
+<rect x="46" y="204" width="208" height="171" rx="16" fill="#ffffff" stroke="#dbe0d6"/>
+<text x="65" y="237" font-size="13" font-weight="700" fill="#75846f">01</text>
+<text x="65" y="275" font-size="20" font-weight="700" fill="#25352f">Your idea</text>
+<text x="65" y="310" font-size="14" fill="#5d6b62">Who is it for?</text>
+<text x="65" y="333" font-size="14" fill="#5d6b62">What should it do?</text>
+<path d="M258 289h10" fill="none" stroke="#8c9c8d" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="271" y="204" width="208" height="171" rx="16" fill="#ffffff" stroke="#dbe0d6"/>
+<text x="290" y="237" font-size="13" font-weight="700" fill="#75846f">02</text>
+<text x="290" y="275" font-size="20" font-weight="700" fill="#25352f">Real references</text>
+<text x="290" y="310" font-size="14" fill="#5d6b62">Choose a base app.</text>
+<text x="290" y="333" font-size="14" fill="#5d6b62">Pick useful features.</text>
+<path d="M483 289h10" fill="none" stroke="#8c9c8d" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="496" y="204" width="208" height="171" rx="16" fill="#fff0e7" stroke="#d5a58f"/>
+<text x="515" y="237" font-size="13" font-weight="700" fill="#ba4e35">03</text>
+<text x="515" y="275" font-size="20" font-weight="700" fill="#25352f">A new proposal</text>
+<text x="515" y="310" font-size="14" fill="#5d6b62">Connect the ideas.</text>
+<text x="515" y="333" font-size="14" fill="#5d6b62">Shape a useful workflow.</text>
+<path d="M708 289h10" fill="none" stroke="#8c9c8d" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="721" y="204" width="208" height="171" rx="16" fill="#ffffff" stroke="#dbe0d6"/>
+<text x="740" y="237" font-size="13" font-weight="700" fill="#75846f">04</text>
+<text x="740" y="275" font-size="20" font-weight="700" fill="#25352f">Your design</text>
+<text x="740" y="310" font-size="14" fill="#5d6b62">Review the screens.</text>
+<text x="740" y="333" font-size="14" fill="#5d6b62">Edit before building.</text>
+<path d="M933 289h10" fill="none" stroke="#8c9c8d" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="946" y="204" width="208" height="171" rx="16" fill="#edf4e8" stroke="#dbe0d6"/>
+<text x="965" y="237" font-size="13" font-weight="700" fill="#75846f">05</text>
+<text x="965" y="275" font-size="20" font-weight="700" fill="#25352f">A working app</text>
+<text x="965" y="310" font-size="14" fill="#5d6b62">Build an Android APK.</text>
+<text x="965" y="333" font-size="14" fill="#5d6b62">Try it in the browser.</text>
+<text x="46" y="421" font-size="11" font-weight="700" letter-spacing="1.6" fill="#75846f">ONE EXAMPLE: A MORE THOUGHTFUL BUDGET APP</text>
+<rect x="46" y="441" width="1108" height="84" rx="14" fill="#ffffff" fill-opacity=".85" stroke="#dbe0d6"/>
+<text x="68" y="473" font-size="15" font-weight="700" fill="#46634b">Cashew as the base</text>
+<text x="68" y="499" font-size="13" fill="#6c786e">Familiar cards and category budgets</text>
+<text x="354" y="486" font-size="24" fill="#9aa493">+</text>
+<text x="401" y="473" font-size="15" font-weight="700" fill="#46634b">Reference ideas + your request</text>
+<text x="401" y="499" font-size="13" fill="#6c786e">Calendar, budget clarity, purchase preview</text>
+<path d="M742 482h37" fill="none" stroke="#8c9c8d" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="811" y="473" font-size="15" font-weight="700" fill="#ba4e35">Try a purchase before recording it</text>
+<text x="811" y="499" font-size="13" fill="#6c786e">See the impact. Then decide.</text>
+</g></svg>
