@@ -42,7 +42,7 @@ const scenes = [
   },
 ];
 function render(scene, index) {
-  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620"><rect width="1100" height="620" rx="24" fill="#f8f7f1"/><g font-family="Arial, Helvetica, sans-serif">`;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620"><rect width="1100" height="620" rx="24" fill="#ffffff"/><g font-family="Arial, Helvetica, sans-serif">`;
   s += text(44, 57, 'meld<tspan fill="#b94f37">.</tspan>', 32, ink, 700);
   s += text(726, 52, 'YOUR APP PROPOSAL AGENT', 13, muted, 700);
   ['Idea', 'References', 'Proposal', 'Design', 'Working app'].forEach((label, i) => {
@@ -96,6 +96,12 @@ strip=Image.new('RGB',(1100,620*5))
 for i,scene in enumerate(scenes): strip.paste(scene,(0,i*620))
 palette=strip.quantize(colors=128)
 frames=[frame.quantize(palette=palette,dither=Image.Dither.NONE) for frame in frames]
+# Pin the canvas color after quantization so GIF palette averaging cannot tint it.
+for frame in frames:
+ colors=frame.getpalette()
+ white=frame.getpixel((550,155))
+ colors[white*3:white*3+3]=[255,255,255]
+ frame.putpalette(colors)
 output=root/'docs/images/meld-agent.gif'
 frames[0].save(output,save_all=True,append_images=frames[1:],duration=durations,loop=0,optimize=True,disposal=1)
 with Image.open(output) as im:

@@ -1,21 +1,19 @@
+<h1 align="center">Meld</h1>
+
+<p align="center">
+  <strong>Good apps are a starting point. Build something of your own.</strong><br>
+  An app proposal agent that brings references, your ideas, and a working Android app together.
+</p>
+
+<p align="center">
+  <a href="#see-what-it-builds">Watch the demos</a> · <a href="#try-it">Try it locally</a> · <a href="docs/project-workflow.md">How it works</a>
+</p>
+
 [![Meld in motion: an idea becomes references, a proposal, an editable design and a working Android app](docs/images/meld-agent.gif)](docs/project-workflow.md)
 
-<p align="center">
-  <strong>An app proposal agent that turns inspiration into an app you can use.</strong><br>
-  Describe what you need. Meld finds references, proposes a direction, and builds the design you approve.
-</p>
-
-<p align="center">
-  <a href="#see-what-it-builds">Watch the demos</a> · <a href="#try-it">Try it locally</a> · <a href="docs/project-workflow.md">How it works</a> · <a href="docs/images/meld-agent.svg">Static overview</a>
-</p>
-
-## From inspiration to your own app
-
-**A base to build on.** Choose an existing app as the foundation. Its screens guide the layout and visual language; its core workflow anchors the proposal.
-
-**Ideas that work together.** Meld combines selected reference features and your requests into a product plan, explaining what to keep, adapt or add. You can see where each idea came from.
-
-**You shape it before it ships.** Edit the proposal and design, then approve the build. Download the Android APK or try that same app in the browser, with build and verification reports alongside it.
+- **Start with what works.** A real base app anchors the visual style and core workflow.
+- **Make the ideas fit.** Meld turns reference features and your requests into a focused product proposal.
+- **Shape it, then try it.** Edit the design, approve the build, and download or preview the Android app.
 
 ## See what it builds
 
@@ -45,13 +43,6 @@ Two ideas, two bases, two working Android apps. Each animation compares the base
 
 [▶ Full video](frontend/public/demos/focus-grove.mp4) · [Design & checks](docs/focus-grove-example.md) · [Source](examples/focus-grove/)
 
-<details>
-<summary>About the comparisons</summary>
-
-Forest is shown through store screenshots; the other three apps use actual APK footage. The generated apps are base-inspired adaptations, with simpler artwork in Focus Grove. Forest already offers sounds and statistics; Cashew already offers calendars and daily allowance. The proposals show how the ideas fit together, without claiming those individual features are new. Both generated demos passed device checks; visual equivalence with the originals has not been established. Details and evidence are linked above.
-
-</details>
-
 ## Try it
 
 With Node 24, JDK 17+ and Android SDK 35:
@@ -63,4 +54,4 @@ npm run dev
 
 Open **http://127.0.0.1:4173**. New builds need model configuration; saved sessions and APKs stay local. The demo videos and Android source are included in this repo.
 
-[Setup](frontend/README.md) · [Architecture](docs/project-workflow.md) · [UI skills](docs/ui-coding-skills.md) · [Demo details](docs/demos/README.md)
+[Setup](frontend/README.md) · [Static overview](docs/images/meld-agent.svg) · [Architecture](docs/project-workflow.md) · [UI skills](docs/ui-coding-skills.md) · [Demo details](docs/demos/README.md)
