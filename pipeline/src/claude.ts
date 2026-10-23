@@ -1,3 +1,4 @@
+import { selectedModelConfig } from './model-selection.js';
 import { baseUiDesignSkill } from './ui-design-skill.js';
 import { baseUiImages, baseUiDesignInstructions, imageMediaType } from './base-ui.js';
 import Anthropic from '@anthropic-ai/sdk';
@@ -29,6 +30,7 @@ export class Claude {
   lastCallId?: string;
   provider: 'anthropic' | 'openai' | 'codex_cli' | 'claude_cli';
   constructor(public root: string, public run: string, public state: any) {
+    state.config = selectedModelConfig(state.config);
     this.provider = state.config.provider || 'anthropic';
     if (!['anthropic', 'openai', 'codex_cli', 'claude_cli'].includes(this.provider)) throw new Error('Unsupported model provider');
     if (this.provider === 'codex_cli' || this.provider === 'claude_cli') return;

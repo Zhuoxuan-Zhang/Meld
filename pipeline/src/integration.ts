@@ -26,3 +26,5 @@ export type { BaseUiReferenceT, BaseUiEvidenceT } from './base-ui.js';
 export { BaseUiMapping, validateBaseUiMapping } from "./base-ui.js";
 export type { BaseUiMappingT } from "./base-ui.js";
 export { baseUiDesignSkill } from "./ui-design-skill.js";
+
+export { modelSelectionContext, selectedModel, selectedModelConfig } from './model-selection.js';

@@ -185,6 +185,7 @@ test("domains remain an explicit alternative to a confirmed idea", async ({ page
     scans.push(route.request().postDataJSON()); return route.fulfill({ json: { result } });
   });
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: /What would you love/ })).toBeVisible();
   await page.evaluate(({ searchPlan, result }) => localStorage.setItem("meld.workspace.v1", JSON.stringify({ version: 1, domains: ["Notes & lists"], discoveryStarted: false, selected: {}, market: { "Notes & lists": result }, intent: { idea: "Keep my notes", turns: [], reply: { message: "Ready", questions: [], plan: searchPlan }, approved: true } })), { searchPlan, result });
   await page.reload();
   await page.getByRole("button", { name: "Use domains only", exact: true }).click();

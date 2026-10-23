@@ -1,3 +1,4 @@
+import { selectedModel } from '../model-selection.js';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
@@ -16,7 +17,7 @@ export class LiveDesignModel implements DesignModel {
     return withLock(path.join(dir, 'model.lock'), async () => {
       const statePath = path.join(dir, 'run.json');
       const state = await exists(statePath) ? await json(statePath) : { id: 'design-workbench', config: this.config, calls: [], created_at: new Date().toISOString() };
-      if (state.config.provider !== this.config.provider || state.config.model !== this.config.model) throw new Error('Keep the model configuration stable within a design workspace');
+      if (!selectedModel() && (state.config.provider !== this.config.provider || state.config.model !== this.config.model)) throw new Error('Keep the model configuration stable within a design workspace');
       await write(statePath, state);
       return new Claude(this.project, dir, state).ask(label, prompt, context, schema, validate);
     }, 1000);

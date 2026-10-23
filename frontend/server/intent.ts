@@ -1,3 +1,5 @@
+import { selectedModel } from "../../backend/src/model-selection";
+import { probeConnection } from "../../backend/src/accounts";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -28,7 +30,7 @@ export function intentApi(directory: string, clarify?: Clarify, probe = () => sp
     if (!req.url?.startsWith("/api/intent/")) return next();
     try {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) throw new WorkbenchError("origin_denied", "Use Meld from its own browser address.", 403);
-      if (req.url === "/api/intent/status" && req.method === "GET") return send(res, 200, { available: probe() });
+      if (req.url === "/api/intent/status" && req.method === "GET") return send(res, 200, { available: selectedModel() ? (await probeConnection(selectedModel()!.provider)).loggedIn : probe() });
       if (req.url !== "/api/intent/clarify" || req.method !== "POST") throw new WorkbenchError("not_found", "Endpoint not found.", 404);
       const input = IntentInput.parse(await readBody(req));
       if (res.destroyed) return;

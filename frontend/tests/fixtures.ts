@@ -29,6 +29,7 @@ export const test = base.extend<{ offlineMarket: void }>({
               json: { error: "Claude Code is not available." },
             }),
       );
+      await page.route("**/api/account/status", route => route.fulfill({ json: { enabled: false } }));
       await page.route("**/api/projects", route => route.fulfill({ json: { projects: [] } }));
       await page.route("**/api/status", route => route.fulfill({ json: { available: false } }));
       await page.route("**/api/design/status", route => route.fulfill({ json: { available: false, exampleId: null, referenceFilesConfigured: false } }));

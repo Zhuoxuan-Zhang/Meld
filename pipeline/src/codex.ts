@@ -49,7 +49,7 @@ export async function executeCodex(dir: string, request: any, timeout: number, s
       // The npm launcher starts a native child. Stop the whole owned group so
       // cancellation cannot leave that child running with the pipes open.
       const detached = process.platform !== 'win32';
-      const child = spawn('codex', args, {cwd,env,detached,stdio:['pipe','pipe','pipe']});
+      const child = spawn(process.env.MELD_CODEX_BIN || 'codex', args, {cwd,env,detached,stdio:['pipe','pipe','pipe']});
       let timedOut = false, exceeded = false, outputLimitReached = false, eventBuffer = '';
       const stop = () => {
         if (detached && child.pid) {

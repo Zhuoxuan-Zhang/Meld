@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { WorkbenchError } from "../../pipeline/dist/src/integration.js";
 
 export type Middleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => void | Promise<void>;
-export type ApiHost = { middlewares: { use: (middleware: Middleware) => void } };
+export type ApiHost = { httpServer?: { once(event: "close", listener: () => void): unknown } | null; middlewares: { use: (middleware: Middleware) => void } };
 export type ApiPlugin = { name: string; configureServer: (server: ApiHost) => void; configurePreviewServer?: (server: ApiHost) => void };
 export function send(response: ServerResponse, status: number, data: unknown) {
   if (response.destroyed || response.headersSent) return;

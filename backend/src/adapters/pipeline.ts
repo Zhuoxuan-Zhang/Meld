@@ -1,3 +1,4 @@
+import { selectedModel, selectedModelConfig } from "../model-selection";
 import { currentWorker, workerIsAlive, type WorkerOwner } from "../worker";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -72,14 +73,25 @@ export async function renderSelectionScope(input: DesignInputValue, apps: Market
 
 export function processPipelineRunner(toolRoot?: string, observationConfig?: string): PipelineRunner {
   return async input => {
+    const selection = selectedModel();
+    let config = input.config;
+    let executionSelection = selection;
+    if (selection) {
+      config = path.join(path.dirname(input.run), "selected-model.config.json");
+      // A resumed detailed run retains its original model configuration.
+      // Its fingerprint and validated cached stages must stay reproducible.
+      if (!(await exists(config))) await write(config, selectedModelConfig(await json(input.config), selection));
+      const saved = await json(config);
+      executionSelection = { provider: saved.provider, model: saved.model, effort: saved.reasoning_effort };
+    }
     const output = path.join(path.dirname(input.run), "execution.log");
     const handle = await fs.open(output, "a");
-    const command = input.basis === "market" ? ["--run", input.run, "--brief", input.brief, "--market", input.market, "--config", input.config, ...(input.staticRun ? ["--static-run", input.staticRun] : [])] : await exists(path.join(input.run, "run.json")) ? ["resume", "--run", input.run]
-      : ["run", "--run", input.run, "--apks", ...input.apks, "--brief", input.brief, "--config", input.config, "--market-input", input.market, ...(input.pauseForDecisions ? ["--pause-for-decisions"] : []), ...(input.analysisOnly ? ["--analysis-only"] : [])];
+    const command = input.basis === "market" ? ["--run", input.run, "--brief", input.brief, "--market", input.market, "--config", config, ...(input.staticRun ? ["--static-run", input.staticRun] : [])] : await exists(path.join(input.run, "run.json")) ? ["resume", "--run", input.run]
+      : ["run", "--run", input.run, "--apks", ...input.apks, "--brief", input.brief, "--config", config, "--market-input", input.market, ...(input.pauseForDecisions ? ["--pause-for-decisions"] : []), ...(input.analysisOnly ? ["--analysis-only"] : [])];
     try {
       return await new Promise<number | null>((resolve, reject) => {
         const child = spawn(process.execPath, ["--import", "tsx", input.basis === "market" ? "src/market-design.ts" : "src/cli.ts", ...command], {
-          cwd: pipelineRoot, env: { ...process.env, ...(!process.env.JAVA_HOME && existsSync("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java") ? { JAVA_HOME: "/Applications/Android Studio.app/Contents/jbr/Contents/Home" } : {}), ...(toolRoot ? { MELD_PIPELINE_TOOL_ROOT: toolRoot } : {}), ...(observationConfig ? { MELD_REA_OBSERVATION_CONFIG: observationConfig } : {}) }, stdio: ["ignore", handle.fd, handle.fd],
+          cwd: pipelineRoot, env: { ...process.env, ...(executionSelection ? { MELD_MODEL_SELECTION: JSON.stringify(executionSelection) } : {}), ...(!process.env.JAVA_HOME && existsSync("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java") ? { JAVA_HOME: "/Applications/Android Studio.app/Contents/jbr/Contents/Home" } : {}), ...(toolRoot ? { MELD_PIPELINE_TOOL_ROOT: toolRoot } : {}), ...(observationConfig ? { MELD_REA_OBSERVATION_CONFIG: observationConfig } : {}) }, stdio: ["ignore", handle.fd, handle.fd],
         });
         // A server shutdown stops the owned pipeline, not unrelated processes.
         const stop = () => child.kill("SIGTERM");

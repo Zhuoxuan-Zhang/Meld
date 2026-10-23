@@ -1,3 +1,4 @@
+import { accountApi, AccountService } from "./accounts";
 import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -16,8 +17,11 @@ import type { Middleware } from "./http";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), frontendDir = path.join(root, "frontend");
 if (existsSync(path.join(frontendDir, ".env.local"))) process.loadEnvFile(path.join(frontendDir, ".env.local"));
 const env = process.env, options = projectOptionsFromEnv(env, frontendDir), service = new ProjectService(options);
-const middleware: Middleware[] = [projectsMiddleware(service, defaultAvailability(env, frontendDir))];
+const account = new AccountService(path.join(frontendDir, ".meld-cache/model-selection.json"));
+const middleware: Middleware[] = [];
 const host = { middlewares: { use(handler: Middleware) { middleware.push(handler); } } };
+accountApi(account).configureServer(host);
+middleware.push(projectsMiddleware(service, defaultAvailability(env, frontendDir)));
 intentApi(path.join(frontendDir, ".meld-cache")).configureServer(host);
 marketApi({ ...marketOptionsFromEnv(env, frontendDir), onResult: result => options.signals.record(result) }).configureServer(host);
 claudeApi(claudeOptionsFromEnv(env, frontendDir)).configureServer(host);
@@ -31,4 +35,4 @@ const server = createServer((request, response) => {
 const port = Number(env.MELD_API_PORT || 3001);
 server.listen(port, "127.0.0.1", () => console.log(`Meld backend: http://127.0.0.1:${port}`));
 server.on("error", error => { console.error(error.message); process.exitCode = 1; });
-for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { stopOwnedProcesses(); options.emulator?.close(); server.close(); setTimeout(() => process.exit(0), 3000).unref(); });
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { account.close(); stopOwnedProcesses(); options.emulator?.close(); server.close(); setTimeout(() => process.exit(0), 3000).unref(); });

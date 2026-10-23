@@ -1,3 +1,5 @@
+import { selectedModel } from "./model-selection";
+import { probeConnection } from "./accounts";
 import { baseUiResolver, readBaseUiEvidence } from "./base-ui";
 import { imageMediaType } from "../../pipeline/dist/src/integration.js";
 import path from "node:path";
@@ -136,5 +138,5 @@ function claudeCliLoggedIn() {
 }
 export function defaultAvailability(env: Record<string, string | undefined>, frontendDir: string) {
   const market = createMarketService(marketOptionsFromEnv(env, frontendDir));
-  return async () => ({ uiReviewConfigured: Boolean(env.MELD_UI_VALIDATION_CONFIG), referenceObservationConfigured: Boolean(env.MELD_REA_OBSERVATION_CONFIG), researchAvailable: await market.isAvailable(), designAvailable: claudeCliLoggedIn(), buildAvailable: await fs.access(path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "platforms/android-35/android.jar")).then(() => true, () => false) && await fs.access(path.join(env.JAVA_HOME || "", "bin/java")).then(() => true, () => false) });
+  return async () => ({ uiReviewConfigured: Boolean(env.MELD_UI_VALIDATION_CONFIG), referenceObservationConfigured: Boolean(env.MELD_REA_OBSERVATION_CONFIG), researchAvailable: await market.isAvailable(), designAvailable: selectedModel() ? (await probeConnection(selectedModel()!.provider)).loggedIn : claudeCliLoggedIn(), buildAvailable: await fs.access(path.join(env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || "", "platforms/android-35/android.jar")).then(() => true, () => false) && await fs.access(path.join(env.JAVA_HOME || "", "bin/java")).then(() => true, () => false) });
 }

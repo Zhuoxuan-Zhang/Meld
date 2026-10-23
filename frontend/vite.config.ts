@@ -1,3 +1,4 @@
+import { accountApi, AccountService } from "../backend/src/accounts";
 import { workflowApi } from "./server/workflow";
 import { intentApi } from "./server/intent";
 import path from "node:path";
@@ -20,10 +21,11 @@ export default defineConfig(({ mode }) => {
   const claudeBinary = claude.locate();
   if (claudeBinary) process.env.MELD_CLAUDE_BIN = claudeBinary;
   if (claude.env.CLAUDE_CONFIG_DIR) process.env.CLAUDE_CONFIG_DIR = claude.env.CLAUDE_CONFIG_DIR;
-  for (const key of ["MELD_BUILD_PROVIDER", "MELD_CODEX_BUILD_MODEL", "MELD_CLAUDE_BUILD_MODEL", "REA_ADB_PATH"]) if (env[key]) process.env[key] = env[key];
+  for (const key of ["MELD_CODEX_BIN", "MELD_BUILD_PROVIDER", "MELD_CODEX_BUILD_MODEL", "MELD_CLAUDE_BUILD_MODEL", "REA_ADB_PATH"]) if (env[key]) process.env[key] = env[key];
   return {
     plugins: [
       react(),
+      accountApi(new AccountService(path.join(cache, "model-selection.json"))),
       intentApi(cache),
       workflowApi(env, process.cwd(), signals),
       marketApi({ ...marketOptionsFromEnv(env, process.cwd()), record: result => signals.record(result) }),

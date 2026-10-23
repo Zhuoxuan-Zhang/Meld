@@ -52,6 +52,8 @@ npm run setup
 npm run dev
 ```
 
-Open **http://127.0.0.1:4173**. New builds need model configuration; saved sessions and APKs stay local. The demo videos and Android source are included in this repo.
+Open **http://127.0.0.1:4173**, connect your OpenAI or Anthropic account, and choose a model. We recommend **GPT-6.1 Sol · Medium** for a balance of performance and cost. Saved sessions and APKs stay local; demo videos and Android source are included in this repo.
+
+Account sign-in uses the official Codex or Claude Code CLI on your computer. [Connection setup](docs/model-accounts.md) · [Model guidance](https://developers.openai.com/api/docs/guides/model-selection)
 
 [Setup](frontend/README.md) · [Static overview](docs/images/meld-agent.svg) · [Architecture](docs/project-workflow.md) · [UI skills](docs/ui-coding-skills.md) · [Demo details](docs/demos/README.md)

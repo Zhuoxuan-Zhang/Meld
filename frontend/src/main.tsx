@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import AccountGate from "./AccountGate";
 import ProjectWorkspace from "./ProjectWorkspace";
 import "@fontsource-variable/inter";
 import "./styles.css";
@@ -14,6 +15,6 @@ if (location.hash.startsWith("#/") || location.pathname === "/legacy") {
 }
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ProjectWorkspace />
+    <AccountGate><ProjectWorkspace /></AccountGate>
   </React.StrictMode>,
 );
