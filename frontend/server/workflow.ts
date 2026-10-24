@@ -58,8 +58,9 @@ export async function importSelection(service: ProjectService, signals: SignalsS
 }
 
 export function workflowApi(env: Record<string, string>, frontendDir: string, signals: SignalsStore, supplied?: ProjectService): ApiPlugin {
-  const sdk = path.join(os.homedir(), "Library/Android/sdk"), java = "/Applications/Android Studio.app/Contents/jbr/Contents/Home";
-  const configured = { ...env, MELD_ANDROID_SDK: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || (existsSync(sdk) ? sdk : ""), JAVA_HOME: env.JAVA_HOME || (existsSync(java) ? java : ""), MELD_APK_DIR: env.MELD_APK_DIR || path.join(frontendDir, ".meld-cache/apks") };
+  const sdk = path.join(os.homedir(), "Library/Android/sdk");
+  const java = ["/Applications/Android Studio.app/Contents/jbr/Contents/Home", "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home", "/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"].find(home => existsSync(path.join(home, "bin/java"))) || "";
+  const configured = { ...env, MELD_ANDROID_SDK: env.MELD_ANDROID_SDK || env.ANDROID_HOME || env.ANDROID_SDK_ROOT || (existsSync(sdk) ? sdk : ""), JAVA_HOME: env.JAVA_HOME || java, MELD_APK_DIR: env.MELD_APK_DIR || path.join(frontendDir, ".meld-cache/apks") };
   const options = projectOptionsFromEnv(configured, frontendDir);
   const service = supplied || new ProjectService(options);
   const route = projectsMiddleware(service, defaultAvailability(configured, frontendDir));
